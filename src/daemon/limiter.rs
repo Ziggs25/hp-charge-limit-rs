@@ -152,17 +152,17 @@ impl Limiter {
     }
 
     /// Ends the limiter with the mode `policy` picks for `exit`; returns
-    /// that mode, or None if the mode was kept.
+    /// that mode, or None if the mode was kept (by policy, or because the
+    /// write failed).
     pub fn finish(mut self, exit: Exit, policy: &ExitPolicy, capacity: u8, fw: &mut impl ChargeControl) -> Option<Mode> {
         let label = exit.label();
-        let mode = policy.mode(exit, capacity);
-        match mode {
-            Some(mode) => {
-                self.write(fw, mode, label, capacity);
+        match policy.mode(exit, capacity) {
+            Some(mode) => self.write(fw, mode, label, capacity).then_some(mode),
+            None => {
+                println!("{label}: cap={capacity}% -> mode kept");
+                None
             }
-            None => println!("{label}: cap={capacity}% -> mode kept"),
         }
-        mode
     }
 }
 
