@@ -48,13 +48,22 @@ pub fn sbcc_command(mode: Mode) -> String {
     format!("{SBCC} b{hex}")
 }
 
-/// GBCC mode byte values.
+/// GBCC mode byte values. GBCC derives them from the EC charge state and
+/// flags (last match wins); mainline hp-wmi reads the same byte on Spectre
+/// boards (GBCO) and names 1, 5 and 6 the same way.
 mod reported {
     pub const AUTO: u8 = 0;
-    pub const FORCE_DISCHARGE: u8 = 2;
+    /// Auto while charging is in progress
+    pub const CHARGING: u8 = 1;
+    /// The battery is discharging: running on battery, or force-discharge
+    pub const DISCHARGING: u8 = 2;
     pub const HOLD: u8 = 3;
     pub const INHIBIT: u8 = 4;
+    /// Inhibit variant (firmware-specific flag)
+    pub const INHIBIT_VARIANT: u8 = 5;
     pub const INHIBIT_SHIP_ARMED: u8 = 6;
+    /// GBCC found no battery
+    pub const NO_BATTERY: u8 = 0xFF;
 }
 
 /// The mode byte GBCC reports (first byte of its buffer).
@@ -65,10 +74,13 @@ impl Reported {
     pub fn name(self) -> &'static str {
         match self.0 {
             reported::AUTO => "auto",
-            reported::FORCE_DISCHARGE => "force-discharge",
+            reported::CHARGING => "auto (charging)",
+            reported::DISCHARGING => "discharging (on battery, or force-discharge)",
             reported::HOLD => "hold (SBTC)",
             reported::INHIBIT => "inhibit (SBIS)",
+            reported::INHIBIT_VARIANT => "inhibit variant",
             reported::INHIBIT_SHIP_ARMED => "inhibit/ship-mode armed",
+            reported::NO_BATTERY => "no battery",
             _ => "unknown",
         }
     }
