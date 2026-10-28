@@ -220,8 +220,9 @@ not an independent battery diagnostic.
 sudo hp-charge-limit-rs diagnose
 ```
 
-Checks battery discovery and capacity, external power supplies, the
-`acpi_call` interface and access permissions, and firmware mode readback.
+Reports the machine (vendor, model, board ID, BIOS version) for compatibility
+reports, then checks battery discovery and capacity, external power supplies,
+the `acpi_call` interface and access permissions, and firmware mode readback.
 Reports service state and systemd unit/configuration paths; it does not
 validate configuration values. An offline adapter is normal. Missing required
 supplies, invalid readings, access failures, or failed firmware queries give a

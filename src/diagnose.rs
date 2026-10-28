@@ -16,7 +16,38 @@ fn check(ok: bool, label: impl Display, detail: impl Display) -> bool {
     ok
 }
 
+/// Vendor, model, board and BIOS version, as far as readable.
+struct Machine {
+    vendor: Option<String>,
+    model: Option<String>,
+    board: Option<String>,
+    bios: Option<String>,
+}
+
+fn machine() -> Machine {
+    let dmi = |name: &str| paths::read_trimmed(&paths::at(&format!("/sys/class/dmi/id/{name}")));
+    Machine { vendor: dmi("sys_vendor"), model: dmi("product_name"), board: dmi("board_name"), bios: dmi("bios_version") }
+}
+
+/// Reported only: what testers should include in a report.
+fn identify() {
+    let m = machine();
+    let unknown = || "?".to_string();
+    report(
+        "info",
+        "machine",
+        format!(
+            "{} {}, board {}, BIOS {}",
+            m.vendor.unwrap_or_else(unknown),
+            m.model.unwrap_or_else(unknown),
+            m.board.unwrap_or_else(unknown),
+            m.bios.unwrap_or_else(unknown)
+        ),
+    );
+}
+
 pub fn run() -> Result<()> {
+    identify();
     let mut ok = supplies();
     ok &= firmware();
     service();
