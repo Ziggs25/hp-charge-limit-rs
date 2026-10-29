@@ -6,7 +6,8 @@ Battery charge limiter using the firmware's ACPI WMI method
 I tried this on an HP Victus 16-r1000 laptop. It may work on your PC too,
 but compatibility is not guaranteed: your firmware must expose the same
 methods and buffer layout. There is no model or board check, so verify
-compatibility before using it; unsupported firmware calls can be unsafe.
+compatibility before using it; unsupported firmware calls can be unsafe
+(see [Is it safe for my laptop?](#is-it-safe-for-my-laptop)).
 
 | mode | SBCC | while running | survives shutdown |
 |---|---|---|---|
@@ -15,6 +16,39 @@ compatibility before using it; unsupported firmware calls can be unsafe.
 | `hold` | 0x0300 (SBTC) | no charge, LED/status still say charging | yes (live test 2, one 12.5 min trial) |
 
 Only these three are ever written (never discharge 0x0200 or ship mode 0x0600/0x0700).
+
+## Is it safe for my laptop?
+
+The worst this tool can do is stop your battery from charging, and one
+command (`set auto`) undoes that. It is still an unofficial tool, provided
+without warranty (see the licenses). These are the reasons the risk is
+small:
+
+- **It only switches charging on and off.** The three modes are the
+  firmware's own charge switches: four flags in the embedded controller's
+  (EC) memory, WACL, SBIS, SBTC and WPBS. `auto` clears all four, which is
+  the stock state. Nothing touches BIOS settings, NVRAM or flash.
+- **It never charges more, and never drains or disconnects the battery.**
+  A limiter only ever charges less. The battery pack's own protection
+  electronics are not touched; inhibit and hold are states the EC firmware
+  itself implements. Force-discharge (0x0200) and battery ship mode
+  (0x0600/0x0700, which disconnects the battery) cannot be expressed in the
+  code: no command or option sends them.
+- **Firmware without this method refuses the call.** `diagnose` only reads.
+  `acpi_call` answers `AE_NOT_FOUND` when the method is missing, and nothing
+  changes. The remaining risk is firmware that has the method but means
+  something else by it. That is why you should run
+  [`diagnose`](#setup-diagnostics) first, and why reports with your model
+  matter.
+- **Undo is one command, and stopping does it for you.** `set auto` restores
+  normal charging at any time; stopping or uninstalling the service sets
+  auto by default. Inhibit ends by itself at shutdown. Hold is the only mode
+  that outlasts a shutdown, until `set auto` or the service's next start.
+  In hold the LED and battery status may say charging while no charge
+  flows; that is only cosmetic.
+
+Uninstalling leaves the laptop as it was before: see the uninstall steps
+for [Linux](#linux-manual-installation) and [Arch](#arch-linux-aur).
 
 ## Why this repo?
 
@@ -136,6 +170,7 @@ To uninstall a manual installation:
 
 ```sh
 sudo systemctl disable --now hp-charge-limit-rs
+sudo hp-charge-limit-rs set auto   # stock charging, whatever the stop mode was
 sudo rm /usr/bin/hp-charge-limit-rs /etc/systemd/system/hp-charge-limit-rs.service
 sudo rm -f /usr/share/dbus-1/system.d/io.github.kralonur.HpChargeLimit.conf \
     /etc/xdg/autostart/io.github.kralonur.HpChargeLimit.Notify.desktop
@@ -144,11 +179,15 @@ sudo systemctl daemon-reload
 sudo rm -f /etc/modules-load.d/hp-charge-limit-rs.conf
 ```
 
-Stopping the service restores normal charging with the default stop mode.
-Your config, documentation, licenses, and off-state history remain in
-`/etc/hp-charge-limit-rs.conf`, `/usr/share/doc/hp-charge-limit-rs/`,
-`/usr/share/licenses/hp-charge-limit-rs/`, and `/var/lib/hp-charge-limit-rs/`;
-remove them separately if no longer needed.
+Your config, documentation, licenses, and off-state history remain; to
+remove those too:
+
+```sh
+sudo rm -rf /etc/hp-charge-limit-rs.conf /var/lib/hp-charge-limit-rs \
+    /usr/share/doc/hp-charge-limit-rs /usr/share/licenses/hp-charge-limit-rs
+```
+
+You can also remove the `acpi_call` module package if nothing else uses it.
 
 ### Arch Linux (AUR)
 
@@ -188,9 +227,14 @@ To uninstall:
 
 ```sh
 sudo systemctl disable --now hp-charge-limit-rs
+sudo hp-charge-limit-rs set auto        # stock charging, whatever the stop mode was
 sudo pacman -R hp-charge-limit-rs-bin   # prebuilt package
 # Or: sudo pacman -R hp-charge-limit-rs # source-built package
+sudo rm -rf /var/lib/hp-charge-limit-rs # off-state history
 ```
+
+If you had edited the config, pacman keeps it as
+`/etc/hp-charge-limit-rs.conf.pacsave`; delete that too for a clean slate.
 
 ## Use
 
