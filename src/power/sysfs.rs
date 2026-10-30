@@ -1,14 +1,12 @@
-//! Battery and AC adapter readings from sysfs.
+//! Linux backend: battery and AC adapter readings from sysfs.
 
+use super::{Energy, Reading, Voltage};
 use crate::paths::{self, POWER_SUPPLY};
-use std::fmt;
 use std::fs;
-use std::ops::Sub;
 use std::path::PathBuf;
 
-const MICRO_PER_MILLI: i64 = 1_000;
-const MICRO_PER_UNIT: f64 = 1_000_000.0;
 const ADAPTER_ONLINE: &str = "1";
+const MICRO_PER_UNIT: f64 = 1_000_000.0;
 
 /// Discover afresh so hotplugged supplies appear on the next read.
 /// Prefer BAT1 for compatibility, then use stable alphabetical ordering.
@@ -34,71 +32,16 @@ fn battery_attr(name: &str) -> Option<String> {
     paths::read_trimmed(&battery()?.join(name))
 }
 
-/// Battery energy in µWh, the unit of sysfs `energy_now`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Energy(i64);
-
-impl Energy {
-    pub const fn from_mwh(mwh: i64) -> Self {
-        Self(mwh * MICRO_PER_MILLI)
-    }
-    pub const fn from_uwh(uwh: i64) -> Self {
-        Self(uwh)
-    }
-    pub const fn uwh(self) -> i64 {
-        self.0
-    }
-    pub const fn mwh(self) -> i64 {
-        self.0 / MICRO_PER_MILLI
-    }
-    pub fn wh(self) -> f64 {
-        self.0 as f64 / MICRO_PER_UNIT
-    }
-    pub const fn abs(self) -> Self {
-        Self(self.0.abs())
-    }
-}
-
-impl Sub for Energy {
-    type Output = Energy;
-    fn sub(self, rhs: Energy) -> Energy {
-        Energy(self.0 - rhs.0)
-    }
-}
-
-impl fmt::Display for Energy {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:.2} Wh", self.wh())
-    }
-}
-
-/// Battery voltage in µV, the unit of sysfs `voltage_now`.
-#[derive(Clone, Copy, Debug)]
-pub struct Voltage(i64);
-
-impl fmt::Display for Voltage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:.2} V", self.0 as f64 / MICRO_PER_UNIT)
-    }
-}
-
-/// What the limiter needs each cycle.
-#[derive(Clone, Copy, Debug)]
-pub struct Reading {
-    pub capacity: u8,
-    pub on_ac: bool,
-}
-
 pub fn capacity() -> Option<u8> {
     battery_attr("capacity")?.parse().ok()
 }
 
 pub fn energy() -> Option<Energy> {
-    battery_attr("energy_now")?.parse().ok().map(Energy)
+    battery_attr("energy_now")?.parse().ok().map(Energy::from_uwh)
 }
 
 pub fn voltage() -> Option<Voltage> {
-    battery_attr("voltage_now")?.parse().ok().map(Voltage)
+    battery_attr("voltage_now")?.parse().ok().map(Voltage::from_uv)
 }
 
 pub fn status() -> Option<String> {

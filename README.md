@@ -462,15 +462,16 @@ removed before rerunning its publishing job.
 | module | role |
 |---|---|
 | `cli` | clap definitions, defaults as named constants |
-| `daemon/` | `mod.rs` loop: waits on a signal channel with the poll interval as timeout; `limiter` the charge band state machine and exit policy |
-| `firmware` | SBCC command building, GBCC parsing, acpi_call transport (lock, single read), `ChargeControl` trait (implemented by `Wmi`) |
-| `power` | sysfs battery/AC readings, `Energy`/`Voltage` unit types |
+| `daemon/` | `mod.rs` loop: waits on a control channel with the poll interval as timeout; `limiter` the charge band state machine and exit policy; `linux` signals |
+| `firmware/` | `Mode`/`Reported`, `ChargeControl` trait (implemented by `Wmi`); `acpi_call` SBCC command building, GBCC parsing, transport (lock, single read) |
+| `power/` | `Energy`/`Voltage` unit types; `sysfs` battery/AC readings |
 | `offstate` | energy record across shutdown |
 | `bypass` | temporary bypass flag shared by the CLI and daemon |
-| `diagnose` | setup checks, GBCC readback, service configuration reporting; no mode changes |
-| `events` | D-Bus signal definitions and the daemon-side emitter (best effort) |
+| `diagnose` | machine/board identification, setup checks, GBCC readback, service configuration reporting; no mode changes |
+| `events/` | limiter events; `dbus` signal definitions and the daemon-side emitter (best effort) |
 | `notify` | user-side helper turning those signals into desktop notifications |
-| `status`, `systemd`, `paths` | status command, systemctl queries, system paths |
+| `service/` | `systemd` queries |
+| `status`, `paths` | status command, system paths |
 
 During normal polling, a failed threshold transition keeps the current state
 and is retried on the next AC-powered poll if the threshold condition still

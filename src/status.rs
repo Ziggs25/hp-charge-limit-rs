@@ -2,7 +2,7 @@
 
 use crate::firmware::Wmi;
 use crate::power::{self, Energy};
-use crate::{bypass, offstate, systemd};
+use crate::{bypass, offstate, service};
 use anyhow::{Context, Result};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -42,7 +42,7 @@ pub fn show(watch_secs: Option<u64>) -> Result<()> {
         }
         Err(e) => println!("firmware: unreadable: {e:#}"),
     }
-    println!("service:  {} {}", systemd::SERVICE, systemd::service_state());
+    println!("service:  {} {}", service::SERVICE, service::service_state());
     if let Some(line) = offstate::last() {
         println!("last off: {line}");
     }

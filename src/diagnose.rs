@@ -1,7 +1,7 @@
 //! Setup diagnostics: queries only, never SBCC writes or service changes.
 
 use crate::firmware::Wmi;
-use crate::{paths, power, systemd};
+use crate::{paths, power, service};
 use anyhow::{Result, ensure};
 use std::fmt::Display;
 use std::fs::OpenOptions;
@@ -103,10 +103,10 @@ fn firmware() -> bool {
 
 /// Reported only: the service is optional for manual commands.
 fn service() {
-    let state = systemd::service_state();
+    let state = service::service_state();
     let mark = if state == "active" { "ok" } else { "warn" };
     report(mark, "service", format!("{state} (optional for manual commands)"));
-    match systemd::service_config() {
+    match service::service_config() {
         Some(config) => {
             println!("[info] service configuration (reported, not validated):");
             for line in config.lines() {

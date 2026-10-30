@@ -18,8 +18,8 @@ mod notify;
 mod offstate;
 mod paths;
 mod power;
+mod service;
 mod status;
-mod systemd;
 
 use anyhow::Result;
 use cli::{Cli, Cmd};

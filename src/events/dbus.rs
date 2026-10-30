@@ -4,6 +4,7 @@
 //! Emitting is strictly best effort. A missing or broken bus never affects
 //! charge control, and only root may own `NAME` (see the bus policy file).
 
+use super::Event;
 use crate::firmware::Mode;
 use clap::ValueEnum;
 use std::time::{Duration, Instant};
@@ -16,18 +17,6 @@ pub const INTERFACE: &str = "io.github.kralonur.HpChargeLimit";
 
 /// Wait this long before trying to reach the bus again after a failure.
 const RETRY_AFTER: Duration = Duration::from_secs(60);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Event {
-    /// Charging was blocked at the stop threshold
-    LimitReached { capacity: u8 },
-    /// Charging was allowed again at the start threshold
-    ChargingResumed { capacity: u8 },
-    /// Bypass took effect (true) or ended (false)
-    BypassChanged { enabled: bool },
-    /// A firmware write failed; sent once per run of failures
-    WriteFailed { mode: Mode, error: String },
-}
 
 impl Event {
     fn signal(&self) -> &'static str {
