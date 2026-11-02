@@ -1,7 +1,10 @@
-//! Events the limiter reports; the daemon broadcasts them as D-Bus
-//! signals (see `dbus`).
+//! Events the limiter reports. On Linux the daemon also broadcasts them as
+//! D-Bus signals (see `dbus`); Windows has no notifier yet, so there they
+//! only appear in the daemon log.
 
+#[cfg(target_os = "linux")]
 mod dbus;
+#[cfg(target_os = "linux")]
 pub use dbus::*;
 
 use crate::firmware::Mode;

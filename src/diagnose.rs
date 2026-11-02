@@ -1,9 +1,12 @@
 //! Setup diagnostics: queries only, never SBCC writes or service changes.
 
 use crate::firmware::Wmi;
-use crate::{paths, power, service};
+#[cfg(target_os = "linux")]
+use crate::paths;
+use crate::{power, service};
 use anyhow::{Result, ensure};
 use std::fmt::Display;
+#[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
 
 fn report(mark: &str, label: impl Display, detail: impl Display) {
@@ -24,9 +27,23 @@ struct Machine {
     bios: Option<String>,
 }
 
+#[cfg(target_os = "linux")]
 fn machine() -> Machine {
     let dmi = |name: &str| paths::read_trimmed(&paths::at(&format!("/sys/class/dmi/id/{name}")));
     Machine { vendor: dmi("sys_vendor"), model: dmi("product_name"), board: dmi("board_name"), bios: dmi("bios_version") }
+}
+
+#[cfg(windows)]
+fn machine() -> Machine {
+    let cimv2 = crate::wmi::Namespace::connect(r"root\cimv2").ok();
+    let first = |class: &str| cimv2.as_ref()?.first(class).ok().flatten();
+    let (system, board, bios) = (first("Win32_ComputerSystem"), first("Win32_BaseBoard"), first("Win32_BIOS"));
+    Machine {
+        vendor: system.as_ref().and_then(|o| o.string("Manufacturer")),
+        model: system.as_ref().and_then(|o| o.string("Model")),
+        board: board.as_ref().and_then(|o| o.string("Product")),
+        bios: bios.as_ref().and_then(|o| o.string("SMBIOSBIOSVersion")),
+    }
 }
 
 /// Reported only: what testers should include in a report.
@@ -56,6 +73,7 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn supplies() -> bool {
     let mut ok = match power::battery() {
         Some(path) => {
@@ -80,6 +98,26 @@ fn supplies() -> bool {
     ok
 }
 
+#[cfg(windows)]
+fn supplies() -> bool {
+    let mut ok = check(power::present(), "battery", if power::present() { "present" } else { "no system battery" });
+    match power::capacity().filter(|&capacity| capacity <= 100) {
+        Some(capacity) => ok &= check(true, "capacity", format!("{capacity}%")),
+        None => ok &= check(false, "capacity", "unknown"),
+    }
+    let ac = match power::ac_status() {
+        Some(true) => (true, "online"),
+        Some(false) => (true, "offline (normal when unplugged)"),
+        None => (false, "unknown"),
+    };
+    ok &= check(ac.0, "AC adapter", ac.1);
+    let details = power::energy().is_some();
+    report(if details { "ok" } else { "warn" }, "battery details (root\\wmi BatteryStatus)",
+        if details { "readable" } else { "unreadable; status shows less, limiting still works" });
+    ok
+}
+
+#[cfg(target_os = "linux")]
 fn firmware() -> bool {
     let call = paths::at(paths::ACPI_CALL);
     if !call.exists() {
@@ -101,6 +139,22 @@ fn firmware() -> bool {
     }
 }
 
+#[cfg(windows)]
+fn firmware() -> bool {
+    match crate::firmware::interface() {
+        Ok(instance) => report("ok", "HP BIOS WMI (root\\wmi hpqBIntM)", instance),
+        Err(e) => {
+            report("fail", "HP BIOS WMI (root\\wmi hpqBIntM)", format!("{e:#}"));
+            report("skip", "firmware readback", "interface unavailable");
+            return false;
+        }
+    }
+    match Wmi.read() {
+        Ok(mode) => check(true, "firmware readback (command 1, type 0x2B)", mode),
+        Err(e) => check(false, "firmware readback (command 1, type 0x2B)", format!("{e:#}")),
+    }
+}
+
 /// Reported only: the service is optional for manual commands.
 fn service() {
     let state = service::service_state();
@@ -113,6 +167,6 @@ fn service() {
                 println!("  {line}");
             }
         }
-        None => report("warn", "service configuration", "systemctl unavailable or query failed"),
+        None => report("warn", "service configuration", "service not installed or query failed"),
     }
 }

@@ -8,7 +8,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 const WATCH_SAMPLE: Duration = Duration::from_secs(5);
-/// sysfs energy_now moves in 10 mWh steps; smaller changes are noise.
+/// Reported energy moves in 10 mWh steps (sysfs energy_now; Windows
+/// RemainingCapacity is often coarser); smaller changes are noise.
 const ENERGY_RESOLUTION: Energy = Energy::from_mwh(10);
 
 pub fn show(watch_secs: Option<u64>) -> Result<()> {
@@ -52,10 +53,10 @@ pub fn show(watch_secs: Option<u64>) -> Result<()> {
     Ok(())
 }
 
-/// Samples energy_now: the only reliable sign of charge flow, since LED and
-/// status say "Charging" under hold.
+/// Samples remaining energy: the only reliable sign of charge flow, since
+/// LED and status say "Charging" under hold.
 fn watch(span: Duration) -> Result<()> {
-    let start = power::energy().context("energy_now unreadable")?;
+    let start = power::energy().context("battery energy unreadable")?;
     let t0 = Instant::now();
     println!("watching energy for {} s ...", span.as_secs());
     while t0.elapsed() < span {

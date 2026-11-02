@@ -46,8 +46,9 @@ pub fn save(capacity: u8, action: &str) {
     let Some(energy) = power::energy() else { return };
     let record = Record { at: SystemTime::now(), energy, capacity, action: action.into() };
     let path = paths::at(OFF_STATE);
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
+    if let Err(e) = paths::ensure_dir_for(&path) {
+        eprintln!("off-state not saved: {e:#}");
+        return;
     }
     let _ = fs::write(path, record.to_line());
 }

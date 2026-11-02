@@ -1,10 +1,20 @@
 //! The WMI battery-charge-control methods SBCC (set) and GBCC (get).
 //!
-//! The modes and readback are firmware facts; the backend is how the
-//! platform reaches them (Linux: the ACPI methods through acpi_call).
+//! Both platforms reach the same firmware code: Linux calls the ACPI
+//! methods directly through acpi_call, Windows goes through the HP BIOS WMI
+//! class `hpqBIntM`, whose dispatcher (WHCM) routes command type 0x2B to
+//! GBCC (read) and SBCC (write).
 
+#[cfg(target_os = "linux")]
 mod acpi_call;
+#[cfg(target_os = "linux")]
 use acpi_call as backend;
+#[cfg(windows)]
+mod hpqbint;
+#[cfg(windows)]
+use hpqbint as backend;
+#[cfg(windows)]
+pub use hpqbint::interface;
 
 use anyhow::Result;
 use clap::ValueEnum;

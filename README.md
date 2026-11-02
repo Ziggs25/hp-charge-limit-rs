@@ -1,7 +1,8 @@
 # hp-charge-limit-rs
 
 Battery charge limiter using the firmware's ACPI WMI method
-`\_SB.WMID.SBCC` through `acpi_call`.
+`\_SB.WMID.SBCC`: through `acpi_call` on Linux, and through HP's BIOS WMI
+interface on Windows ([experimental, testers wanted](#windows-experimental-testers-wanted)).
 
 I tried this on an HP Victus 16-r1000 laptop. It may work on your PC too,
 but compatibility is not guaranteed: your firmware must expose the same
@@ -27,7 +28,8 @@ small:
 - **It only switches charging on and off.** The three modes are the
   firmware's own charge switches: four flags in the embedded controller's
   (EC) memory, WACL, SBIS, SBTC and WPBS. `auto` clears all four, which is
-  the stock state. Nothing touches BIOS settings, NVRAM or flash.
+  the stock state. Nothing touches BIOS settings, NVRAM or flash, and on
+  Windows no driver is installed.
 - **It never charges more, and never drains or disconnects the battery.**
   A limiter only ever charges less. The battery pack's own protection
   electronics are not touched; inhibit and hold are states the EC firmware
@@ -35,11 +37,13 @@ small:
   (0x0600/0x0700, which disconnects the battery) cannot be expressed in the
   code: no command or option sends them.
 - **Firmware without this method refuses the call.** `diagnose` only reads.
-  `acpi_call` answers `AE_NOT_FOUND` when the method is missing, and nothing
-  changes. The remaining risk is firmware that has the method but means
-  something else by it. That is why you should run
-  [`diagnose`](#setup-diagnostics) first, and why reports with your model
-  matter.
+  On Linux, `acpi_call` answers `AE_NOT_FOUND` when the method is missing;
+  on Windows, HP's BIOS answers return code 4 for a command type it does not
+  have. Nothing changes in either case. The remaining risk is firmware that
+  has the method but means something else by it. That is why you should run
+  [`diagnose`](#setup-diagnostics) first (on Windows, follow the
+  [test order](#windows-experimental-testers-wanted)), and why reports with
+  your model matter.
 - **Undo is one command, and stopping does it for you.** `set auto` restores
   normal charging at any time; stopping or uninstalling the service sets
   auto by default. Inhibit ends by itself at shutdown. Hold is the only mode
@@ -48,7 +52,8 @@ small:
   flows; that is only cosmetic.
 
 Uninstalling leaves the laptop as it was before: see the uninstall steps
-for [Linux](#linux-manual-installation) and [Arch](#arch-linux-aur).
+for [Linux](#linux-manual-installation), [Arch](#arch-linux-aur) and
+[Windows](#windows-experimental-testers-wanted) (*Remove everything*).
 
 ## Why this repo?
 
@@ -235,6 +240,118 @@ sudo rm -rf /var/lib/hp-charge-limit-rs # off-state history
 
 If you had edited the config, pacman keeps it as
 `/etc/hp-charge-limit-rs.conf.pacsave`; delete that too for a clean slate.
+
+### Windows (experimental, testers wanted)
+
+> **Untested on real hardware.** The Windows build compiles and uses the
+> same firmware method as Linux, but nobody has run it on a laptop yet. If
+> you try it, please open an issue with your results (see below). Nothing it
+> does is permanent: [why it is low-risk](#is-it-safe-for-my-laptop), and
+> *Remove everything* below undoes all of it.
+
+Windows reaches SBCC without any driver. The firmware's WMI dispatcher
+(`\_SB.WMID.WHCM`) is exposed to Windows as the `root\wmi` class
+`hpqBIntM`, the same interface OMEN Gaming Hub, OmenMon and similar tools
+use. BIOS command 1 (read) / 2 (write) with command type `0x2B` lands in
+GBCC / SBCC with the same buffer the Linux build passes through
+`acpi_call`. It is also the slot mainline Linux `hp-wmi` drives for
+`charge_behaviour` on HP Spectre boards 8C15/8C17 (there named GBCO/SBCO),
+with the same auto/inhibit values. Run everything from an
+**administrator** terminal.
+
+**Get it:** download the `x86_64-pc-windows-msvc` `.zip` from GitHub Releases
+(or from a manual workflow run's artifacts), or build from source with
+`cargo build --locked --release`. The exe is not code-signed, so
+SmartScreen may warn before the first run.
+
+**Test in this order** and stop at the first step that fails:
+
+```powershell
+.\hp-charge-limit-rs.exe diagnose          # read only: machine, hpqBIntM, GBCC readback
+.\hp-charge-limit-rs.exe set inhibit       # first write; should report inhibit
+.\hp-charge-limit-rs.exe status --watch 60 # on AC, energy should stay flat
+.\hp-charge-limit-rs.exe set hold          # the service's default at shutdown
+.\hp-charge-limit-rs.exe status --watch 60 # flat again, though Windows may say charging
+.\hp-charge-limit-rs.exe set auto          # back to normal charging
+```
+
+If a write step fails or anything looks wrong, run `set auto`: it restores
+normal charging. If you would rather not try hold, skip those two steps and
+install with `--off-mode inhibit` (or `keep`).
+
+**Run it as a service** (starts at boot, takes the same options as `daemon`):
+
+```powershell
+.\hp-charge-limit-rs.exe service install --stop 80 --start 75
+& "C:\Program Files\hp-charge-limit-rs\hp-charge-limit-rs.exe" status
+& "C:\Program Files\hp-charge-limit-rs\hp-charge-limit-rs.exe" service uninstall
+```
+
+`service install` copies the exe to `C:\Program Files\hp-charge-limit-rs\`
+and registers that copy as a LocalSystem service: a service must not run
+an exe that unelevated programs could replace, as one in Downloads could
+be. Run `service install` again, from a new version or with new options,
+to upgrade or reconfigure. `service uninstall` stops it (applying
+`--stop-mode`, auto by default), removes it and the copy (run from the
+copy, as above, Windows deletes the copy at the next restart). To try the
+loop without a service, run `daemon` in the terminal; Ctrl+C applies
+`--stop-mode`.
+
+The log (`daemon.log`) and off-state record live in
+`C:\ProgramData\hp-charge-limit-rs\`, which the tool restricts to SYSTEM and
+Administrators (readable by users). If that folder exists with another
+owner, it refuses to use it: delete the folder and retry.
+
+**Remove everything.** This puts the laptop back exactly as it was. Run it
+from the downloaded exe (download the zip again if you deleted it):
+
+```powershell
+.\hp-charge-limit-rs.exe service uninstall   # stops the service (it sets auto), removes it and its Program Files copy
+.\hp-charge-limit-rs.exe set auto            # stock charging, whatever a test or --stop-mode left
+.\hp-charge-limit-rs.exe status              # firmware: auto (on battery it says discharging)
+.\hp-charge-limit-rs.exe bypass off          # only if you used bypass; a restart clears it anyway
+Remove-Item -Recurse -Force C:\ProgramData\hp-charge-limit-rs   # log and off-state record
+```
+
+Then delete the downloaded files. If you never installed the service, the
+first line just says so. The tool changes nothing else: no driver, no BIOS
+setting, no startup entry or scheduled task. Besides the charge mode and the
+bypass flag (lines 2 and 4), its only traces are the service registration,
+the Program Files copy and the data folder, and the commands above remove
+all of them.
+
+Differences from Linux:
+
+- Shutdown and restart are reported by Windows directly (pre-shutdown),
+  so no detection guesswork. The default "Shut down" with **Fast Startup**
+  is a hibernate that does not stop services; the service also applies the
+  off-mode (hold) on every sleep and hibernate, and limits again on resume
+  (or, if Windows never reports the resume, two polls later; the log then
+  says `awake without a resume event`). Whether Windows delivers these
+  events, on a Fast Startup shutdown in particular, is unverified. If the
+  laptop charges while off, turn Fast Startup off (Control Panel → Power
+  Options → "Choose what the power buttons do"), or
+  use `--run-mode hold`, which blocks charging the same way while running
+  and while off.
+- The bypass flag is the volatile registry key
+  `HKLM\SOFTWARE\hp-charge-limit-rs-bypass`: a restart drops it, a Fast
+  Startup shutdown (a hibernate) keeps it.
+- No desktop notifications yet (`notify` and `--notify` are Linux only).
+- Battery details in `status` come from the `root\wmi` battery classes;
+  charge % and AC come from `GetSystemPowerStatus`.
+- HP's own battery features (the HP / myHP app's battery charge control,
+  OMEN Gaming Hub, the BIOS "Adaptive Battery Optimizer" where present) may
+  set the same firmware mode; turn them off while testing so they don't
+  fight over it.
+
+**Please report:** the output of `diagnose` (it includes model, board ID
+and BIOS version), of `set inhibit` and `set hold` with their
+`status --watch 60`, and whether hold survived a shutdown (`status` shows
+`last off: ...` after the next start). Return code 4 from the BIOS means
+your firmware has no command type `0x2B`; please report that too. If you
+ran the service through a sleep or shutdown, attach
+`C:\ProgramData\hp-charge-limit-rs\daemon.log`: it shows which of those
+events Windows delivered.
 
 ## Use
 
@@ -462,15 +579,17 @@ removed before rerunning its publishing job.
 | module | role |
 |---|---|
 | `cli` | clap definitions, defaults as named constants |
-| `daemon/` | `mod.rs` loop: waits on a control channel with the poll interval as timeout; `limiter` the charge band state machine and exit policy; `linux` signals |
-| `firmware/` | `Mode`/`Reported`, `ChargeControl` trait (implemented by `Wmi`); `acpi_call` SBCC command building, GBCC parsing, transport (lock, single read) |
-| `power/` | `Energy`/`Voltage` unit types; `sysfs` battery/AC readings |
+| `daemon/` | `mod.rs` loop: waits on a control channel with the poll interval as timeout; `limiter` the charge band state machine and exit policy; `linux` signals, `windows` service/console control |
+| `firmware/` | `Mode`/`Reported`, `ChargeControl` trait (implemented by `Wmi`); `acpi_call` SBCC command building, GBCC parsing, transport (lock, single read); `hpqbint` the Windows `hpqBIntM` call |
+| `power/` | `Energy`/`Voltage` unit types; `sysfs` (Linux) and `windows` battery/AC readings |
 | `offstate` | energy record across shutdown |
-| `bypass` | temporary bypass flag shared by the CLI and daemon |
+| `bypass` | temporary bypass flag shared by the CLI and daemon (file under `/run`; volatile registry key on Windows) |
 | `diagnose` | machine/board identification, setup checks, GBCC readback, service configuration reporting; no mode changes |
-| `events/` | limiter events; `dbus` signal definitions and the daemon-side emitter (best effort) |
-| `notify` | user-side helper turning those signals into desktop notifications |
-| `service/` | `systemd` queries |
+| `events/` | limiter events; `dbus` signal definitions and the daemon-side emitter (best effort, Linux) |
+| `notify` | user-side helper turning those signals into desktop notifications (Linux) |
+| `service/` | `systemd` queries (Linux); `windows` install/uninstall and SCM queries |
+| `wmi` | minimal COM/WMI wrapper (Windows) |
+| `acl` | creates/checks the Windows data directory so only SYSTEM and Administrators can change it |
 | `status`, `paths` | status command, system paths |
 
 During normal polling, a failed threshold transition keeps the current state
@@ -485,7 +604,9 @@ consumes the limiter, so nothing ticks after it.
 ## Verification and limitations
 
 There is currently no automated test suite. `cargo check --locked` checks
-compilation; it does not verify firmware behavior.
+compilation; it does not verify firmware behavior. The Windows build is
+checked with `cargo check --target x86_64-pc-windows-gnu` and `clippy`; it has
+not run on hardware yet.
 
 Previous observations on my laptop reported inhibit readback as GBCC
 mode 4 and hold surviving one approximately 12.5-minute shutdown trial.
