@@ -1,4 +1,4 @@
-name: Linux release
+name: Release
 
 on:
   push:
@@ -77,17 +77,110 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  build-windows:
+    name: Build x86_64-pc-windows-msvc
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          test "$TAG" = "v$version"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build and check binary
+        env:
+          # static CRT: the exe runs without the VC++ redistributable
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo build --locked --release --target x86_64-pc-windows-msvc
+          target/x86_64-pc-windows-msvc/release/hp-charge-limit-rs.exe --version
+          target/x86_64-pc-windows-msvc/release/hp-charge-limit-rs.exe --help
+
+      # The runner is no HP laptop, so every firmware call fails, but all
+      # around it runs: COM/WMI queries, the registry bypass flag, the data
+      # directory ACL and the service lifecycle as the README describes it.
+      - name: Smoke test without HP firmware
+        run: |
+          exe=target/x86_64-pc-windows-msvc/release/hp-charge-limit-rs.exe
+          installed="/c/Program Files/hp-charge-limit-rs/hp-charge-limit-rs.exe"
+          data=/c/ProgramData/hp-charge-limit-rs
+          wait_running() {
+            for _ in $(seq 40); do
+              sc.exe query hp-charge-limit-rs | grep RUNNING > /dev/null && return
+              sleep 0.5
+            done
+            sc.exe query hp-charge-limit-rs
+            return 1
+          }
+          # diagnose fails here (exit 1); a panic (101) or crash must not happen
+          code=0; "$exe" diagnose || code=$?; test "$code" = 1
+          "$exe" status
+          "$exe" bypass on
+          # grep without -q reads all output: an early close makes println panic
+          "$exe" status | grep 'bypass: *enabled'
+          "$exe" bypass off
+          "$exe" service install --stop 80 --start 75
+          wait_running
+          "$installed" status
+          # README flow: uninstall from the running installed copy, which is
+          # moved aside for deletion at the next restart
+          "$installed" service uninstall
+          test ! -e "$installed"
+          # reinstalling before that restart must work
+          "$exe" service install --stop 80 --start 75
+          wait_running
+          "$exe" service uninstall
+          test ! -e "$installed"
+          cat "$data/daemon.log"
+          test "$(grep -c -- '--- service start' "$data/daemon.log")" = 2
+          test "$(grep -c 'service stop: cap' "$data/daemon.log")" = 2
+          owner=$(powershell -NoProfile -Command "(Get-Acl -LiteralPath 'C:\ProgramData\hp-charge-limit-rs').Owner" | tr -d '\r')
+          echo "data directory owner: $owner"
+          test "$owner" = 'BUILTIN\Administrators'
+          icacls 'C:\ProgramData\hp-charge-limit-rs'
+
+      - name: Package release
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          name="hp-charge-limit-rs-v$version-x86_64-pc-windows-msvc"
+          mkdir -p "dist/$name"
+          cp target/x86_64-pc-windows-msvc/release/hp-charge-limit-rs.exe README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cd dist
+          7z a -tzip "$name.zip" "$name"
+          sha256sum "$name.zip" > "$name.zip.sha256"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x86_64-pc-windows-msvc
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build, build-windows]
     runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: linux-*
           merge-multiple: true
           path: dist
 
@@ -101,5 +194,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" dist/*.tar.gz dist/*.sha256 \
+          gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 \
             --verify-tag --generate-notes --title "$TAG"

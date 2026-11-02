@@ -549,10 +549,11 @@ At shutdown it saves energy_now; at the next start it logs
 
 ## Publishing releases
 
-The Linux release workflow uses current stable Rust and builds static
+The release workflow uses current stable Rust and builds static
 x86_64 and ARM64 binaries. Archives include the binary, README, licenses,
 systemd unit, default config, D-Bus policy, and notifier autostart entry, with
-a separate SHA256 checksum.
+a separate SHA256 checksum. The same workflow builds an x86_64 Windows
+`.exe` (static CRT) packaged as a `.zip` with README and licenses.
 
 Set the version in `Cargo.toml`, update `Cargo.lock`, commit, then push a
 matching version tag to GitHub:
