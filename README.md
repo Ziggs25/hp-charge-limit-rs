@@ -268,12 +268,23 @@ SmartScreen may warn before the first run.
 
 ```powershell
 .\hp-charge-limit-rs.exe diagnose          # read only: machine, hpqBIntM, GBCC readback
-.\hp-charge-limit-rs.exe set inhibit       # first write; should report inhibit
+.\hp-charge-limit-rs.exe set inhibit       # first write; should report inhibit, LED white
 .\hp-charge-limit-rs.exe status --watch 60 # on AC, energy should stay flat
-.\hp-charge-limit-rs.exe set hold          # the service's default at shutdown
-.\hp-charge-limit-rs.exe status --watch 60 # flat again, though Windows may say charging
+.\hp-charge-limit-rs.exe set hold          # the service's default at shutdown; LED orange
+.\hp-charge-limit-rs.exe status --watch 60 # flat again, though LED and Windows say charging
 .\hp-charge-limit-rs.exe set auto          # back to normal charging
 ```
+
+**What you should see.** The limit uses two modes, and they look different:
+
+- **While the laptop is running: inhibit.** The charge LED turns **white**
+  and the battery shows as not charging. This is how you see the limit
+  working.
+- **While the laptop is off: hold.** Inhibit ends at shutdown, so the
+  service switches to hold just before. In hold the LED stays **orange**,
+  as if charging, and Windows may say charging too, but no charge flows.
+  Don't go by the LED here: `status --watch 60` (energy stays flat) and the
+  `last off` line after the next start show what really happened.
 
 If a write step fails or anything looks wrong, run `set auto`: it restores
 normal charging. If you would rather not try hold, skip those two steps and
@@ -296,6 +307,23 @@ to upgrade or reconfigure. `service uninstall` stops it (applying
 copy, as above, Windows deletes the copy at the next restart). To try the
 loop without a service, run `daemon` in the terminal; Ctrl+C applies
 `--stop-mode`.
+
+**Then test the limit while off**, the main feature and unverified on
+Windows:
+
+1. Install the service (above), keep the charger plugged in, and make sure
+   the battery is above 40%. At or below `--off-min` (40% by default) the
+   service deliberately lets the laptop charge while off.
+2. Shut down normally (Start → Shut down) and leave the laptop off and
+   plugged in for at least 30 minutes. The LED may stay orange; that is
+   expected in hold.
+3. Start it and run `status` from an administrator terminal.
+   `last off: off 34 min in hold: 62% -> 62%, energy +0 mWh` means the limit
+   held; a higher second % (and energy) means it charged while off.
+4. If it charged, turn Fast Startup off and repeat once. That tells
+   "Windows didn't report the shutdown" apart from "the firmware doesn't
+   keep hold". Attach `daemon.log` either way: it shows a `shutdown:` or
+   `suspend:` line for whichever event Windows delivered.
 
 The log (`daemon.log`) and off-state record live in
 `C:\ProgramData\hp-charge-limit-rs\`, which the tool restricts to SYSTEM and
@@ -346,8 +374,8 @@ Differences from Linux:
 
 **Please report:** the output of `diagnose` (it includes model, board ID
 and BIOS version), of `set inhibit` and `set hold` with their
-`status --watch 60`, and whether hold survived a shutdown (`status` shows
-`last off: ...` after the next start). Return code 4 from the BIOS means
+`status --watch 60`, the LED color in each mode, and the result of the
+off test above (the `last off` line). Return code 4 from the BIOS means
 your firmware has no command type `0x2B`; please report that too. If you
 ran the service through a sleep or shutdown, attach
 `C:\ProgramData\hp-charge-limit-rs\daemon.log`: it shows which of those
