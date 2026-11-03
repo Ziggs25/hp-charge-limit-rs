@@ -18,6 +18,26 @@ compatibility before using it; unsupported firmware calls can be unsafe
 
 Only these three are ever written (never discharge 0x0200 or ship mode 0x0600/0x0700).
 
+## Contents
+
+- [Is it safe for my laptop?](#is-it-safe-for-my-laptop)
+- [Why this repo?](#why-this-repo)
+- [How it works](#how-it-works)
+- [Install](#install)
+  - [Linux (manual installation)](#linux-manual-installation)
+  - [Arch Linux (AUR)](#arch-linux-aur)
+  - [Windows (experimental, testers wanted)](#windows-experimental-testers-wanted)
+- [Use](#use)
+  - [Setup diagnostics](#setup-diagnostics)
+  - [Desktop notifications](#desktop-notifications)
+  - [Shell completion](#shell-completion)
+  - [Temporary full-charge bypass](#temporary-full-charge-bypass)
+- [Daemon options](#daemon-options)
+- [Publishing releases](#publishing-releases)
+- [Code layout](#code-layout)
+- [Verification and limitations](#verification-and-limitations)
+- [License](#license)
+
 ## Is it safe for my laptop?
 
 The worst this tool can do is stop your battery from charging, and one
