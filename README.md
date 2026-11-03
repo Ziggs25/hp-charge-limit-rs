@@ -567,6 +567,9 @@ git push origin "v$version"
 
 The AUR packages pick up new releases automatically.
 
+A pre-release version such as `0.4.0-beta.1` is published as a GitHub
+prerelease, which never becomes the repository's latest release.
+
 The tag must match the package version. GitHub Actions publishes the
 release and assets using its built-in token; no personal token is needed.
 The workflow can also be run manually to build downloadable Actions

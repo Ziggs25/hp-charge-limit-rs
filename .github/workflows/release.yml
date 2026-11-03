@@ -194,5 +194,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
+          # a pre-release version (v0.4.0-beta.1) never becomes "Latest"
+          prerelease=()
+          case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 \
-            --verify-tag --generate-notes --title "$TAG"
+            --verify-tag --generate-notes --title "$TAG" "${prerelease[@]}"
