@@ -38,7 +38,7 @@ pub fn show(watch_secs: Option<u64>) -> Result<()> {
         Ok(mode) => {
             println!("firmware: {mode}");
             if mode.is_hold() {
-                println!("          (in hold, LED and status show charging although no charge flows)");
+                println!("          (in hold, LED and status show charging; some boards still charge slowly: check with --watch)");
             }
         }
         Err(e) => println!("firmware: unreadable: {e:#}"),

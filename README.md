@@ -2,7 +2,7 @@
 
 Battery charge limiter using the firmware's ACPI WMI method
 `\_SB.WMID.SBCC`: through `acpi_call` on Linux, and through HP's BIOS WMI
-interface on Windows ([experimental, testers wanted](#windows-experimental-testers-wanted)).
+interface on Windows (see [Tested models](#tested-models)).
 
 I tried this on an HP Victus 16-r1000 laptop. It may work on your PC too,
 but compatibility is not guaranteed: your firmware must expose the same
@@ -14,19 +14,22 @@ compatibility before using it; unsupported firmware calls can be unsafe
 |---|---|---|---|
 | `auto` | 0x0000 | charges | — |
 | `inhibit` | 0x0500 (SBIS) | no charge, white LED, "Not charging" | no, EC clears it |
-| `hold` | 0x0300 (SBTC) | no charge, LED/status still say charging | yes (live test 2, one 12.5 min trial) |
+| `hold` | 0x0300 (SBTC) | no charge or slow charge, depending on the board; LED/status still say charging | yes, but on some boards it only slows charging |
 
 Only these three are ever written (never discharge 0x0200 or ship mode 0x0600/0x0700).
+Inhibit (the limit while running) has worked on every board tested so far;
+hold (the limit while off) depends on the board: see [Tested models](#tested-models).
 
 ## Contents
 
 - [Is it safe for my laptop?](#is-it-safe-for-my-laptop)
 - [Why this repo?](#why-this-repo)
+- [Tested models](#tested-models)
 - [How it works](#how-it-works)
 - [Install](#install)
   - [Linux (manual installation)](#linux-manual-installation)
   - [Arch Linux (AUR)](#arch-linux-aur)
-  - [Windows (experimental, testers wanted)](#windows-experimental-testers-wanted)
+  - [Windows](#windows)
 - [Use](#use)
   - [Setup diagnostics](#setup-diagnostics)
   - [Desktop notifications](#desktop-notifications)
@@ -62,18 +65,19 @@ small:
   have. Nothing changes in either case. The remaining risk is firmware that
   has the method but means something else by it. That is why you should run
   [`diagnose`](#setup-diagnostics) first (on Windows, follow the
-  [test order](#windows-experimental-testers-wanted)), and why reports with
+  [test order](#windows)), and why reports with
   your model matter.
 - **Undo is one command, and stopping does it for you.** `set auto` restores
   normal charging at any time; stopping or uninstalling the service sets
   auto by default. Inhibit ends by itself at shutdown. Hold is the only mode
   that outlasts a shutdown, until `set auto` or the service's next start.
-  In hold the LED and battery status may say charging while no charge
-  flows; that is only cosmetic.
+  In hold the LED and battery status may say charging; that is only
+  cosmetic. On some boards hold still lets a slow charge through (about
+  2 W), so it limits less, but it never charges faster than normal.
 
 Uninstalling leaves the laptop as it was before: see the uninstall steps
 for [Linux](#linux-manual-installation), [Arch](#arch-linux-aur) and
-[Windows](#windows-experimental-testers-wanted) (*Remove everything*).
+[Windows](#windows) (*Remove everything*).
 
 ## Why this repo?
 
@@ -84,8 +88,28 @@ while running, but after shutdown it kept charging.
 This repo uses inhibit while running and, by default, switches to
 `0x0300` (hold) at shutdown to keep charging blocked while off. It also
 has a low-battery override so the laptop can charge while off when needed.
-Hold survived a short shutdown trial on my laptop; behavior on other PCs
-and over longer off periods is not yet verified.
+On my laptop this has worked in daily use for weeks: hold blocks charging
+through every shutdown, overnight included. It does not block charging on
+every board, though: on some it only slows charging to about 2 W, so a long
+shutdown still ends near full. The limit while running works on
+all boards tested so far.
+
+## Tested models
+
+Reports from users, with what each mode did. "Slow charge" means the
+firmware accepted hold (readback `hold (3)`) but the battery still charged
+at about 2 W, against tens of watts in auto.
+
+| model | board | BIOS | OS | inhibit (running) | hold (off) |
+|---|---|---|---|---|---|
+| Victus 16-r1xxx | 8C99 | F.16 | Linux | works | works (blocks charging) |
+| Victus 15-fb0xxx | 8A3D | F.26 | Windows 11 | works | slow charge: about 1.7 W, 80% → 81% in 30 min off, 80% → 100% overnight |
+| Victus 15-fa1xxx | 8C2D | F.18 | Windows 11 | works | (rate not reported) |
+
+Your model is missing or behaves differently? Please
+[open an issue](https://github.com/kralonur/hp-charge-limit-rs/issues)
+with the output of `diagnose` and the tests in the
+[test order](#windows).
 
 ## How it works
 
@@ -103,7 +127,7 @@ flowchart TD
     Exit -->|Service stop| Stock[Auto: normal charging]
     Exit -->|Shutdown or reboot| Low{Battery at or below off-min threshold?}
     Low -->|Yes| ChargeOff[Auto: charge while off]
-    Low -->|No| Hold[Hold: 0x0300, block charging while off]
+    Low -->|No| Hold[Hold: 0x0300, block or slow charging while off]
 ```
 
 Charging resumes at the start threshold (default: 40%) and stops at the
@@ -261,11 +285,13 @@ sudo rm -rf /var/lib/hp-charge-limit-rs # off-state history
 If you had edited the config, pacman keeps it as
 `/etc/hp-charge-limit-rs.conf.pacsave`; delete that too for a clean slate.
 
-### Windows (experimental, testers wanted)
+<a name="windows-experimental-testers-wanted"></a>
 
-> **Untested on real hardware.** The Windows build compiles and uses the
-> same firmware method as Linux, but nobody has run it on a laptop yet. If
-> you try it, please open an issue with your results (see below). Nothing it
+### Windows
+
+> **Check [Tested models](#tested-models) first.** The limit while off
+> depends on the board. Your model may differ, so run the test order below
+> first, and please open an issue with your results (see below). Nothing it
 > does is permanent: [why it is low-risk](#is-it-safe-for-my-laptop), and
 > *Remove everything* below undoes all of it.
 
@@ -290,8 +316,8 @@ SmartScreen may warn before the first run.
 .\hp-charge-limit-rs.exe diagnose          # read only: machine, hpqBIntM, GBCC readback
 .\hp-charge-limit-rs.exe set inhibit       # first write; should report inhibit, LED white
 .\hp-charge-limit-rs.exe status --watch 60 # on AC, energy should stay flat
-.\hp-charge-limit-rs.exe set hold          # the service's default at shutdown; LED orange
-.\hp-charge-limit-rs.exe status --watch 60 # flat again, though LED and Windows say charging
+.\hp-charge-limit-rs.exe set hold           # the service's default at shutdown; LED orange
+.\hp-charge-limit-rs.exe status --watch 300 # 5 min: a slow charge in hold shows only over time
 .\hp-charge-limit-rs.exe set auto          # back to normal charging
 ```
 
@@ -302,9 +328,11 @@ SmartScreen may warn before the first run.
   working.
 - **While the laptop is off: hold.** Inhibit ends at shutdown, so the
   service switches to hold just before. In hold the LED stays **orange**,
-  as if charging, and Windows may say charging too, but no charge flows.
-  Don't go by the LED here: `status --watch 60` (energy stays flat) and the
-  `last off` line after the next start show what really happened.
+  as if charging, and Windows may say charging too. Don't go by the LED
+  here: `status --watch 300` and the `last off` line after the next start
+  show what really happened. On some boards energy stays flat (hold
+  blocks); on others it rises slowly, about +150 mWh in 5 minutes (hold
+  only slows charging). Both are useful reports.
 
 If a write step fails or anything looks wrong, run `set auto`: it restores
 normal charging. If you would rather not try hold, skip those two steps and
@@ -328,8 +356,8 @@ copy, as above, Windows deletes the copy at the next restart). To try the
 loop without a service, run `daemon` in the terminal; Ctrl+C applies
 `--stop-mode`.
 
-**Then test the limit while off**, the main feature and unverified on
-Windows:
+**Then test the limit while off**, which depends on the board (see
+[Tested models](#tested-models)):
 
 1. Install the service (above), keep the charger plugged in, and make sure
    the battery is above 40%. At or below `--off-min` (40% by default) the
@@ -337,13 +365,17 @@ Windows:
 2. Shut down normally (Start → Shut down) and leave the laptop off and
    plugged in for at least 30 minutes. The LED may stay orange; that is
    expected in hold.
-3. Start it and run `status` from an administrator terminal.
-   `last off: off 34 min in hold: 62% -> 62%, energy +0 mWh` means the limit
-   held; a higher second % (and energy) means it charged while off.
-4. If it charged, turn Fast Startup off and repeat once. That tells
-   "Windows didn't report the shutdown" apart from "the firmware doesn't
-   keep hold". Attach `daemon.log` either way: it shows a `shutdown:` or
-   `suspend:` line for whichever event Windows delivered.
+3. Start it and run `status` from an administrator terminal and read the
+   `last off` line, for example
+   `last off: off 34 min in hold: 62% -> 62%, energy +0 mWh`:
+   - about +0 mWh: hold blocks charging on your board
+   - about +1000 mWh per 30 min (about 2 W): hold only slows charging
+   - much more (several Wh per 30 min): hold was lost and it charged
+     normally
+4. If it charged normally, check that `daemon.log` has a `shutdown:` or
+   `suspend:` line from before the shutdown (Windows reported it), then
+   turn Fast Startup off and repeat once. That tells "Windows didn't report
+   the shutdown" apart from "the firmware doesn't keep hold".
 
 The log (`daemon.log`) and off-state record live in
 `C:\ProgramData\hp-charge-limit-rs\`, which the tool restricts to SYSTEM and
@@ -375,12 +407,13 @@ Differences from Linux:
   is a hibernate that does not stop services; the service also applies the
   off-mode (hold) on every sleep and hibernate, and limits again on resume
   (or, if Windows never reports the resume, two polls later; the log then
-  says `awake without a resume event`). Whether Windows delivers these
-  events, on a Fast Startup shutdown in particular, is unverified. If the
+  says `awake without a resume event`). A tester's log shows Windows
+  reporting a full shutdown (`shutdown: cap=80% -> hold`); whether it
+  reports a Fast Startup shutdown is still unverified. If the
   laptop charges while off, turn Fast Startup off (Control Panel → Power
   Options → "Choose what the power buttons do"), or
-  use `--run-mode hold`, which blocks charging the same way while running
-  and while off.
+  use `--run-mode hold`, which keeps hold set while running too (only
+  useful on boards where hold blocks charging).
 - The bypass flag is the volatile registry key
   `HKLM\SOFTWARE\hp-charge-limit-rs-bypass`: a restart drops it, a Fast
   Startup shutdown (a hibernate) keeps it.
@@ -394,7 +427,7 @@ Differences from Linux:
 
 **Please report:** the output of `diagnose` (it includes model, board ID
 and BIOS version), of `set inhibit` and `set hold` with their
-`status --watch 60`, the LED color in each mode, and the result of the
+`status --watch` runs, the LED color in each mode, and the result of the
 off test above (the `last off` line). Return code 4 from the BIOS means
 your firmware has no command type `0x2B`; please report that too. If you
 ran the service through a sleep or shutdown, attach
@@ -657,24 +690,27 @@ consumes the limiter, so nothing ticks after it.
 
 There is currently no automated test suite. `cargo check --locked` checks
 compilation; it does not verify firmware behavior. The Windows build is
-checked with `cargo check --target x86_64-pc-windows-gnu` and `clippy`; it has
-not run on hardware yet.
+checked with `cargo check --target x86_64-pc-windows-gnu` and `clippy`, and
+smoke-tested on a CI runner without HP firmware; on laptops it has only the
+user reports in [Tested models](#tested-models).
 
-Previous observations on my laptop reported inhibit readback as GBCC
-mode 4 and hold surviving one approximately 12.5-minute shutdown trial.
-These are limited observations, not a guarantee for other machines or
-firmware versions.
+On my laptop (board 8C99), inhibit reads back as GBCC mode 4, and weeks of
+daily use show shutdown detection and hold working: every shutdown in the
+journal logs `shutdown: cap=..% -> hold`, and the next boot reports
+`off N min in hold` with no charge gained, over offs of up to 14 hours.
+Testers on other boards found hold only slowing charging (about 2 W), so
+this is not a guarantee for other machines or firmware versions; see
+[Tested models](#tested-models). To check your own laptop, look in the
+journal for those two lines.
 
 Still unverified:
 
-- Whether `systemctl is-system-running` reports `stopping` when this service
-  exits during a real shutdown. Check the previous boot's journal for
-  `shutdown: cap=..% -> hold`, and the next boot for the `off N min` report.
-- Holding through AC unplug/replug while off or over long off periods.
+- Holding through AC unplug/replug while off.
 
 The off-state record and last report live under `/var/lib/hp-charge-limit-rs/`.
 In hold mode, LED and battery status may still say charging; use
-`status --watch 60` to observe energy changes instead.
+`status --watch 300` to observe energy changes instead (a slow charge of
+about 2 W needs a few minutes to show).
 
 ## License
 
