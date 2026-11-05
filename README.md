@@ -103,8 +103,11 @@ at about 2 W, against tens of watts in auto.
 | model | board | BIOS | OS | inhibit (running) | hold (off) |
 |---|---|---|---|---|---|
 | Victus 16-r1xxx | 8C99 | F.16 | Linux | works | works (blocks charging) |
+| Victus 16-e0xxx | 88ED | F.27 | Windows 10 | works | works (blocks charging) |
 | Victus 15-fb0xxx | 8A3D | F.26 | Windows 11 | works | slow charge: about 1.7 W, 80% → 81% in 30 min off, 80% → 100% overnight |
 | Victus 15-fa1xxx | 8C2D | F.18 | Windows 11 | works | (rate not reported) |
+| Victus 15-fa0xxx | 8A4F | F.34 | Windows 11 | works | slow charge: about 2.4 W while running (off test not reported) |
+| Victus 15-fb3xxx | (not reported) | (not reported) | Windows | works | slow charge (rate not reported) |
 
 Your model is missing or behaves differently? Please
 [open an issue](https://github.com/kralonur/hp-charge-limit-rs/issues)
