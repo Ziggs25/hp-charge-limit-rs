@@ -43,10 +43,11 @@ hold (the limit while off) depends on the board: see [Tested models](#tested-mod
 
 ## Is it safe for my laptop?
 
-The worst this tool can do is stop your battery from charging, and one
-command (`set auto`) undoes that. It is still an unofficial tool, provided
-without warranty (see the licenses). These are the reasons the risk is
-small:
+The worst this tool can do is stop your battery from charging. Use
+`bypass on` to allow normal charging while the service is running, or
+`set auto` if no daemon is running. It is still an unofficial tool,
+provided without warranty (see the licenses). These are the reasons the
+risk is small:
 
 - **It only switches charging on and off.** The three modes are the
   firmware's own charge switches: four flags in the embedded controller's
@@ -67,9 +68,12 @@ small:
   [`diagnose`](#setup-diagnostics) first (on Windows, follow the
   [test order](#windows)), and why reports with
   your model matter.
-- **Undo is one command, and stopping does it for you.** `set auto` restores
-  normal charging at any time; stopping or uninstalling the service sets
-  auto by default. Inhibit ends by itself at shutdown. Hold is the only mode
+- **Undo is one command, and stopping does it for you.** With the service
+  running, [`bypass on`](#temporary-full-charge-bypass) pauses its limits and
+  allows normal charging on the next AC-powered poll. `set auto` is only a
+  one-time firmware change: a running daemon can override it. Stopping or
+  uninstalling the service sets auto by default. Inhibit ends by itself at
+  shutdown. Hold is the only mode
   that outlasts a shutdown, until `set auto` or the service's next start.
   In hold the LED and battery status may say charging; that is only
   cosmetic. On some boards hold still lets a slow charge through (about
@@ -313,7 +317,9 @@ with the same auto/inhibit values. Run everything from an
 `cargo build --locked --release`. The exe is not code-signed, so
 SmartScreen may warn before the first run.
 
-**Test in this order** and stop at the first step that fails:
+**Test in this order** and stop at the first step that fails. If you already
+have the service or a foreground daemon running, stop it first so it does
+not override the test commands:
 
 ```powershell
 .\hp-charge-limit-rs.exe diagnose          # read only: machine, hpqBIntM, GBCC readback
@@ -337,9 +343,10 @@ SmartScreen may warn before the first run.
   blocks); on others it rises slowly, about +150 mWh in 5 minutes (hold
   only slows charging). Both are useful reports.
 
-If a write step fails or anything looks wrong, run `set auto`: it restores
-normal charging. If you would rather not try hold, skip those two steps and
-install with `--off-mode inhibit` (or `keep`).
+If a write step fails or anything looks wrong, run `set auto` with the
+service and any foreground daemon stopped: it restores normal charging.
+If you would rather not try hold, skip those two steps and install with
+`--off-mode inhibit` (or `keep`).
 
 **Run it as a service** (starts at boot, takes the same options as `daemon`):
 
@@ -358,6 +365,12 @@ to upgrade or reconfigure. `service uninstall` stops it (applying
 copy, as above, Windows deletes the copy at the next restart). To try the
 loop without a service, run `daemon` in the terminal; Ctrl+C applies
 `--stop-mode`.
+
+**Need a full charge with the service running?** Use
+`.\hp-charge-limit-rs.exe bypass on`, not `set auto`. This pauses the
+service's limits on its next AC-powered poll; use
+`.\hp-charge-limit-rs.exe bypass off` to resume them. You do not need to
+uninstall the service. See [Temporary full-charge bypass](#temporary-full-charge-bypass).
 
 **Then test the limit while off**, which depends on the board (see
 [Tested models](#tested-models)):
@@ -446,7 +459,11 @@ sudo hp-charge-limit-rs set auto            # restore normal charging
 journalctl -u hp-charge-limit-rs -b         # daemon log for this boot
 ```
 
-The running daemon can overwrite one-off mode changes on subsequent polls.
+`set` makes a one-time firmware change; it does not pause or reconfigure the
+daemon. A running service or foreground daemon can overwrite it on a later
+poll, even after `set auto` reports success. To allow a full charge while
+the daemon is running, use [`bypass on`](#temporary-full-charge-bypass);
+use `bypass off` to resume limiting.
 Stop the service first if you want manual control.
 
 Status also shows battery manufacturer/model, health
@@ -583,9 +600,20 @@ PowerShell uses `. ./hp-charge-limit-rs.ps1` (add it to your profile to persist)
 
 ### Temporary full-charge bypass
 
+Use bypass, not `set auto`, when you want a full charge while the service
+or a foreground daemon is running. Bypass pauses the daemon's charge limits;
+`set auto` only changes the firmware once and can be overridden by the daemon.
+
 ```sh
 sudo hp-charge-limit-rs bypass on    # pause thresholds and allow normal charging
 sudo hp-charge-limit-rs bypass off   # resume the configured charge band
+```
+
+On Windows, from an administrator terminal:
+
+```powershell
+.\hp-charge-limit-rs.exe bypass on    # allow a full charge without uninstalling the service
+.\hp-charge-limit-rs.exe bypass off   # resume the configured charge band
 ```
 
 The daemon must be running. Changes take effect on its next AC-powered poll;
