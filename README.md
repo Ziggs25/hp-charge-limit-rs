@@ -2,7 +2,10 @@
 
 Battery charge limiter using the firmware's ACPI WMI method
 `\_SB.WMID.SBCC`: through `acpi_call` on Linux, and through HP's BIOS WMI
-interface on Windows (see [Tested models](#tested-models)).
+interface on Windows (see [Tested models](#tested-models)). On Linux, if
+`\_SB.WMID.GBCC` is missing (`AE_NOT_FOUND`), it tries the alternative
+`GBCO`/`SBCO` interface. Selection uses read-only calls; the existing
+`GBCC`/`SBCC` interface remains preferred.
 
 I tried this on an HP Victus 16-r1000 laptop. It may work on your PC too,
 but compatibility is not guaranteed: your firmware must expose the same

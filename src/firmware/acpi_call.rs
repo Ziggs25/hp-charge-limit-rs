@@ -1,5 +1,5 @@
 //! Linux backend: calls `\_SB.WMID.SBCC`/`GBCC` directly through the
-//! acpi_call module.
+//! acpi_call module, or `SBCO`/`GBCO` when `GBCC` is absent.
 
 use super::{Mode, Reported, mode_data};
 use crate::paths::{self, ACPI_CALL, LOCK};
@@ -9,6 +9,25 @@ use std::io::Read;
 
 const SBCC: &str = r"\_SB.WMID.SBCC";
 const GBCC: &str = r"\_SB.WMID.GBCC";
+const SBCO: &str = r"\_SB.WMID.SBCO";
+const GBCO: &str = r"\_SB.WMID.GBCO";
+
+#[derive(Clone, Copy)]
+enum Interface {
+    Sbcc,
+    Sbco,
+}
+
+impl Interface {
+    fn command(self, mode: Mode) -> String {
+        match self {
+            Self::Sbcc => sbcc_command(mode),
+            // Unlike SBCC, SBCO takes the mode integer, not a WMI buffer.
+            Self::Sbco => format!("{SBCO} {:#x}", mode as u32),
+        }
+    }
+}
+
 /// SBCC takes the WMI request buffer WHCM would pass it: a 16-byte header
 /// (signature, command, type, size), then the mode dword.
 const SBCC_BUFFER_LEN: usize = 20;
@@ -50,15 +69,39 @@ fn acpi_call(cmd: &str) -> Result<String> {
         .and_then(|mut f| f.read(&mut buf))
         .with_context(|| call.display().to_string())?;
     let reply = String::from_utf8_lossy(&buf[..n]);
-    let reply = reply.trim_matches(char::from(0)).trim().to_string();
+    Ok(reply.trim_matches(char::from(0)).trim().to_string())
+}
+
+fn check_reply(cmd: &str, reply: &str) -> Result<()> {
     ensure!(!reply.starts_with(ACPI_ERROR_PREFIX), "{cmd}: {reply}");
-    Ok(reply)
+    Ok(())
+}
+
+/// Select a matched read/write pair using reads only. Do not fall back on
+/// transport errors, other ACPI failures, or malformed firmware replies.
+fn detect(call: &mut impl FnMut(&str) -> Result<String>) -> Result<(Interface, Reported)> {
+    let reply = call(GBCC)?;
+    let (interface, cmd, reply) = if reply == "Error: AE_NOT_FOUND" {
+        (Interface::Sbco, GBCO, call(GBCO)?)
+    } else {
+        (Interface::Sbcc, GBCC, reply)
+    };
+    check_reply(cmd, &reply)?;
+    Ok((interface, parse_gbcc(&reply)?))
 }
 
 pub(super) fn read() -> Result<Reported> {
-    parse_gbcc(&acpi_call(GBCC)?)
+    detect(&mut acpi_call).map(|(_, reported)| reported)
+}
+
+fn set_with(mode: Mode, mut call: impl FnMut(&str) -> Result<String>) -> Result<()> {
+    // Detect even for standalone `set` commands; never discover an interface
+    // by writing, and never retry a failed write through another method.
+    let (interface, _) = detect(&mut call)?;
+    let cmd = interface.command(mode);
+    check_reply(&cmd, &call(&cmd)?)
 }
 
 pub(super) fn set(mode: Mode) -> Result<()> {
-    acpi_call(&sbcc_command(mode)).map(drop)
+    set_with(mode, acpi_call)
 }

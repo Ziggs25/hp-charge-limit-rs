@@ -1,9 +1,10 @@
-//! The WMI battery-charge-control methods SBCC (set) and GBCC (get).
+//! The WMI battery-charge-control methods SBCC (set) and GBCC (get),
+//! or SBCO/GBCO on some firmware.
 //!
 //! Both platforms reach the same firmware code: Linux calls the ACPI
 //! methods directly through acpi_call, Windows goes through the HP BIOS WMI
 //! class `hpqBIntM`, whose dispatcher (WHCM) routes command type 0x2B to
-//! GBCC (read) and SBCC (write).
+//! the matching read/write methods.
 
 #[cfg(target_os = "linux")]
 mod acpi_call;
