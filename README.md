@@ -20,8 +20,9 @@ compatibility before using it; unsupported firmware calls can be unsafe
 | `hold` | 0x0300 (SBTC) | no charge or slow charge, depending on the board; LED/status still say charging | yes, but on some boards it only slows charging |
 
 Only these three are ever written (never discharge 0x0200 or ship mode 0x0600/0x0700).
-Inhibit (the limit while running) has worked on every board tested so far;
-hold (the limit while off) depends on the board: see [Tested models](#tested-models).
+Inhibit (the limit while running) works on the confirmed models, but not
+every reported board/OS combination; hold (the limit while off) also depends
+on the board: see [Tested models](#tested-models).
 
 ## Contents
 
@@ -99,22 +100,27 @@ On my laptop this has worked in daily use for weeks: hold blocks charging
 through every shutdown, overnight included. It does not block charging on
 every board, though: on some it only slows charging to about 2 W, so a long
 shutdown still ends near full. The limit while running works on
-all boards tested so far.
+confirmed models; other reports are still under investigation.
 
 ## Tested models
 
 Reports from users, with what each mode did. "Slow charge" means the
-firmware accepted hold (readback `hold (3)`) but the battery still charged
-at about 2 W, against tens of watts in auto.
+battery still gained energy in hold rather than charging being fully blocked.
+Rates and test durations are listed where reported; readback alone does not
+prove charge blocking.
 
 | model | board | BIOS | OS | inhibit (running) | hold (off) |
 |---|---|---|---|---|---|
 | Victus 16-r1xxx | 8C99 | F.16 | Linux | works | works (blocks charging) |
 | Victus 16-e0xxx | 88ED | F.27 | Windows 10 | works | works (blocks charging) |
+| Victus 16-e1xxx | 8A22 | F.28 | Windows | works | slow charge: about 3.5 W, 80% → 87% in 50 min off |
 | Victus 15-fb0xxx | 8A3D | F.26 | Windows 11 | works | slow charge: about 1.7 W, 80% → 81% in 30 min off, 80% → 100% overnight |
-| Victus 15-fa1xxx | 8C2D | F.18 | Windows 11 | works | (rate not reported) |
+| Victus 15-fa1xxx | 8C2D | F.18 | Windows 11 | works | slow charge: about 2.34 W while running; no charge overnight in hibernate reported (shutdown test not reported) |
 | Victus 15-fa0xxx | 8A4F | F.34 | Windows 11 | works | slow charge: about 2.4 W while running (off test not reported) |
+| Victus 15-fa2xxx | 8DCD | F.07 | Windows 11 | works | not tested |
+| Victus 15-fb2xxx (15-fb2111AX) | 8C2F | F.05 | Windows | works | not tested |
 | Victus 15-fb3xxx | (not reported) | (not reported) | Windows | works | slow charge (rate not reported) |
+| HP Laptop 15s-du4xxx | 89A1 | F.69 | Windows 11 | reported working, occasional small energy increases | +230 mWh in 4 min off; longer test pending; hold adds +500 mWh in 10 min while running ([#3](https://github.com/kralonur/hp-charge-limit-rs/issues/3)) |
 
 Your model is missing or behaves differently? Please
 [open an issue](https://github.com/kralonur/hp-charge-limit-rs/issues)
