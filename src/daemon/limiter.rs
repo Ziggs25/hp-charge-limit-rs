@@ -17,6 +17,7 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 const VERIFY_EVERY: Duration = Duration::from_secs(5 * 60);
+const VERIFY_SOON: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug)]
 pub struct Band {
@@ -117,6 +118,13 @@ impl Limiter {
         }
     }
 
+    /// Verify immediately after a start/resume/bypass write, then recheck
+    /// after `VERIFY_SOON`; the EC can drop the mode while resuming.
+    fn verify_soon(&mut self, now: Instant, fw: &mut impl ChargeControl) {
+        let ok = self.verify(fw);
+        self.verify_at = if ok { now + VERIFY_SOON } else { now };
+    }
+
     /// Events since the last call, oldest first.
     pub fn take_events(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.events)
@@ -125,15 +133,17 @@ impl Limiter {
     /// Always sets a mode, replacing whatever was left (e.g. hold from the
     /// last shutdown); above `start` it keeps limiting unless bypassed.
     pub fn start(band: Band, capacity: u8, bypass: bool, fw: &mut impl ChargeControl) -> Self {
+        let now = Instant::now();
         let mut limiter = Limiter {
             band,
             state: State::Starting,
             events: Vec::new(),
             failing: false,
             last_on_ac: true,
-            verify_at: Instant::now() + VERIFY_EVERY,
+            verify_at: now + VERIFY_SOON,
         };
         limiter.enter(capacity, bypass, fw);
+        limiter.verify_soon(now, fw);
         limiter
     }
 
@@ -189,6 +199,7 @@ impl Limiter {
         let bypassed = self.state == State::Bypassed;
         if bypass != bypassed || self.state == State::Starting {
             self.enter(capacity, bypass, fw);
+            self.verify_soon(now, fw);
             return;
         }
         let Band { stop, start, run_mode } = self.band;
@@ -368,7 +379,7 @@ mod tests {
 
     #[test]
     fn stable_states_are_not_rewritten() {
-        let mut fw = Mock::new(Reported(4));
+        let mut fw = Mock::new(Reported(0));
         let mut limiter = Limiter::start(band(), 40, false, &mut fw);
         assert_eq!(fw.sets, [Mode::Auto]);
         fw.sets.clear();
@@ -432,12 +443,13 @@ mod tests {
 
     #[test]
     fn failed_ac_return_repair_retries_on_the_next_tick() {
-        let mut fw = Mock::new(Reported(0));
+        let mut fw = Mock::new(Reported(4));
         let mut limiter = Limiter::start(band(), 55, false, &mut fw);
         assert_eq!(fw.sets, [Mode::Inhibit]);
         fw.sets.clear();
         let now = Instant::now();
         limiter.tick_at(reading(55, false), false, &mut fw, now);
+        fw.reported = Reported(0);
         fw.fail_sets = 1;
         limiter.tick_at(reading(55, true), false, &mut fw, now);
         assert!(fw.sets.is_empty());
@@ -447,19 +459,34 @@ mod tests {
 
     #[test]
     fn verification_repairs_a_mode_changed_behind_our_back() {
-        let mut fw = Mock::new(Reported(0));
+        let mut fw = Mock::new(Reported(4));
         let mut limiter = Limiter::start(band(), 55, false, &mut fw);
         assert_eq!(fw.sets, [Mode::Inhibit]);
         fw.sets.clear();
+        fw.reported = Reported(0);
         let now = Instant::now() + VERIFY_EVERY;
         limiter.tick_at(reading(55, true), false, &mut fw, now);
-        assert_eq!(fw.reads.get(), 1);
+        assert_eq!(fw.reads.get(), 2);
         assert_eq!(fw.sets, [Mode::Inhibit]);
 
         fw.reported = Reported(4);
         fw.sets.clear();
         limiter.tick_at(reading(55, true), false, &mut fw, now + VERIFY_EVERY);
-        assert_eq!(fw.reads.get(), 2);
+        assert_eq!(fw.reads.get(), 3);
         assert!(fw.sets.is_empty());
+    }
+
+    #[test]
+    fn start_repairs_stale_mode_and_rechecks_soon() {
+        let mut fw = Mock::new(Reported(0));
+        let mut limiter = Limiter::start(band(), 55, false, &mut fw);
+        assert_eq!(fw.reads.get(), 1);
+        assert_eq!(fw.sets, [Mode::Inhibit, Mode::Inhibit]);
+
+        fw.sets.clear();
+        let now = Instant::now() + VERIFY_SOON;
+        limiter.tick_at(reading(55, true), false, &mut fw, now);
+        assert_eq!(fw.reads.get(), 2);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
     }
 }
