@@ -15,13 +15,15 @@ use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileE
 use windows::core::{HSTRING, PCWSTR};
 use windows_service::service::{
     ServiceAccess, ServiceAction, ServiceActionType, ServiceDependency, ServiceErrorControl,
-    ServiceFailureActions, ServiceFailureResetPeriod, ServiceInfo, ServiceStartType, ServiceState, ServiceType,
+    ServiceFailureActions, ServiceFailureResetPeriod, ServiceInfo, ServiceStartType, ServiceState,
+    ServiceType,
 };
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
 pub const SERVICE: &str = "hp-charge-limit-rs";
 const DISPLAY_NAME: &str = "HP charge limit";
-const DESCRIPTION: &str = "Battery charge limiter using the HP BIOS WMI charge-control command (SBCC)";
+const DESCRIPTION: &str =
+    "Battery charge limiter using the HP BIOS WMI charge-control command (SBCC)";
 /// WMI must be up before the daemon's first firmware call.
 const WMI_SERVICE: &str = "Winmgmt";
 const RESTART_DELAY: Duration = Duration::from_secs(5);
@@ -79,14 +81,19 @@ pub fn service_state() -> String {
 /// Command line and start type as `Key=value` lines; None if not
 /// installed or unreadable.
 pub fn service_config() -> Option<String> {
-    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT).ok()?;
-    let service = manager.open_service(SERVICE, ServiceAccess::QUERY_CONFIG).ok()?;
+    let manager =
+        ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT).ok()?;
+    let service = manager
+        .open_service(SERVICE, ServiceAccess::QUERY_CONFIG)
+        .ok()?;
     let config = service.query_config().ok()?;
     Some(format!(
         "ExecStart={}\nStartType={:?}\nAccount={}",
         config.executable_path.display(),
         config.start_type,
-        config.account_name.map_or("LocalSystem".into(), |a| a.to_string_lossy().into_owned()),
+        config
+            .account_name
+            .map_or("LocalSystem".into(), |a| a.to_string_lossy().into_owned()),
     ))
 }
 
@@ -134,7 +141,8 @@ fn copy_exe() -> Result<PathBuf> {
         return Ok(target);
     }
     fs::create_dir_all(install_dir()).with_context(|| install_dir().display().to_string())?;
-    while_in_use(|| fs::copy(&current, &target).map(drop)).with_context(|| format!("copy to {}", target.display()))?;
+    while_in_use(|| fs::copy(&current, &target).map(drop))
+        .with_context(|| format!("copy to {}", target.display()))?;
     println!("installed {}", target.display());
     Ok(target)
 }
@@ -173,43 +181,67 @@ pub fn install(opts: &DaemonOpts) -> Result<()> {
         Ok(service) => {
             stop_and_wait(&service)?;
             let info = info(opts, copy_exe()?)?;
-            service.change_config(&info).context("update service configuration")?;
+            service
+                .change_config(&info)
+                .context("update service configuration")?;
             println!("updated service {SERVICE}");
             (service, info)
         }
         Err(e) if os_code(&e) == Some(NOT_INSTALLED) => {
             let info = info(opts, copy_exe()?)?;
-            let service = manager.create_service(&info, access).context("create service")?;
+            let service = manager
+                .create_service(&info, access)
+                .context("create service")?;
             println!("created service {SERVICE}");
             (service, info)
         }
         Err(e) => return Err(e).context("open service"),
     };
-    service.set_description(DESCRIPTION).context("set service description")?;
+    service
+        .set_description(DESCRIPTION)
+        .context("set service description")?;
     service
         .update_failure_actions(ServiceFailureActions {
             reset_period: ServiceFailureResetPeriod::After(FAILURE_RESET),
             reboot_msg: None,
             command: None,
-            actions: Some(vec![ServiceAction { action_type: ServiceActionType::Restart, delay: RESTART_DELAY }; 3]),
+            actions: Some(vec![
+                ServiceAction {
+                    action_type: ServiceActionType::Restart,
+                    delay: RESTART_DELAY
+                };
+                3
+            ]),
         })
         .context("set service restart on failure")?;
-    service.set_failure_actions_on_non_crash_failures(true).context("set service restart on failure")?;
+    service
+        .set_failure_actions_on_non_crash_failures(true)
+        .context("set service restart on failure")?;
     service.start::<&str>(&[]).context("start service")?;
-    println!("started; command: {} {}", info.executable_path.display(), join(&info.launch_arguments));
+    println!(
+        "started; command: {} {}",
+        info.executable_path.display(),
+        join(&info.launch_arguments)
+    );
     println!("log and off-state record: {}", data.display());
     Ok(())
 }
 
 fn join(args: &[OsString]) -> String {
-    args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ")
+    args.iter()
+        .map(|a| a.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Stops the service (it applies its stop mode, auto by default) and
 /// removes it.
 pub fn uninstall() -> Result<()> {
     let manager = manager(ServiceManagerAccess::CONNECT)?;
-    let service = match manager.open_service(SERVICE, ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE) {
+    let service = match manager.open_service(
+        SERVICE,
+        ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE,
+    ) {
         Ok(service) => service,
         Err(e) if os_code(&e) == Some(NOT_INSTALLED) => {
             println!("service {SERVICE} is not installed");
@@ -221,7 +253,10 @@ pub fn uninstall() -> Result<()> {
     service.delete().context("delete service")?;
     println!("removed service {SERVICE}");
     remove_installed_exe();
-    println!("kept the log and off-state record in {}", paths::data_dir().display());
+    println!(
+        "kept the log and off-state record in {}",
+        paths::data_dir().display()
+    );
     Ok(())
 }
 
@@ -253,12 +288,21 @@ fn remove_installed_exe() {
     };
     match schedule() {
         Ok(()) => println!("{} will be removed at the next restart", dir.display()),
-        Err(e) => println!("could not remove {}: {e:#}; delete it by hand", dir.display()),
+        Err(e) => println!(
+            "could not remove {}: {e:#}; delete it by hand",
+            dir.display()
+        ),
     }
 }
 
 fn delete_at_restart(path: &Path) -> windows::core::Result<()> {
-    unsafe { MoveFileExW(&HSTRING::from(path.as_os_str()), PCWSTR::null(), MOVEFILE_DELAY_UNTIL_REBOOT) }
+    unsafe {
+        MoveFileExW(
+            &HSTRING::from(path.as_os_str()),
+            PCWSTR::null(),
+            MOVEFILE_DELAY_UNTIL_REBOOT,
+        )
+    }
 }
 
 fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
@@ -268,7 +312,12 @@ fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
         Err(e) => return Err(e).context("stop service"),
     }
     let start = Instant::now();
-    while service.query_status().context("query service")?.current_state != ServiceState::Stopped {
+    while service
+        .query_status()
+        .context("query service")?
+        .current_state
+        != ServiceState::Stopped
+    {
         if start.elapsed() > STOP_TIMEOUT {
             bail!("service did not stop within {} s", STOP_TIMEOUT.as_secs());
         }

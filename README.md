@@ -2,10 +2,15 @@
 
 Battery charge limiter using the firmware's ACPI WMI method
 `\_SB.WMID.SBCC`: through `acpi_call` on Linux, and through HP's BIOS WMI
-interface on Windows (see [Tested models](#tested-models)). On Linux, if
-`\_SB.WMID.GBCC` is missing (`AE_NOT_FOUND`), it tries the alternative
-`GBCO`/`SBCO` interface. Selection uses read-only calls; the existing
-`GBCC`/`SBCC` interface remains preferred.
+interface on Windows (see [Tested models](#tested-models)). Linux prefers
+`GBCO`/`SBCO` when declared, otherwise using the `GBCC`/`SBCC` buffer
+interface. Before any charge-control call, ACPICA's `iasl` inspects the
+DSDT and SSDTs (including dynamically loaded tables) offline to discover
+method signatures. Supported pairs are `GBCO(0)`/`SBCO(1)` (packed integer),
+`GBCO(0)`/`SBCO(4)` (four byte arguments), and `GBCC(0)`/`SBCC(1)` (buffer).
+Unknown, incomplete, or ambiguous signatures and tool failures are rejected;
+there is no fallback to guessed writes. Argument counts do not prove that
+unknown firmware implements the same semantics.
 
 I tried this on an HP Victus 16-r1000 laptop. It may work on your PC too,
 but compatibility is not guaranteed: your firmware must expose the same
@@ -116,11 +121,13 @@ prove charge blocking.
 | Victus 16-e1xxx | 8A22 | F.28 | Windows | works | slow charge: about 3.5 W, 80% → 87% in 50 min off |
 | Victus 15-fb0xxx | 8A3D | F.26 | Windows 11 | works | slow charge: about 1.7 W, 80% → 81% in 30 min off, 80% → 100% overnight |
 | Victus 15-fa1xxx | 8C2D | F.18 | Windows 11 | works | slow charge: about 2.34 W while running; no charge overnight in hibernate reported (shutdown test not reported) |
+| Victus 15-fa1xxx | 8BB1 | F.23 | Linux (direct ACPI test) | works: +0 mWh in 1 min, 0 W ([#4](https://github.com/kralonur/hp-charge-limit-rs/issues/4)) | not tested |
 | Victus 15-fa0xxx | 8A4F | F.34 | Windows 11 | works | slow charge: about 2.4 W while running (off test not reported) |
 | Victus 15-fa2xxx | 8DCD | F.07 | Windows 11 | works | not tested |
 | Victus 15-fb2xxx (15-fb2111AX) | 8C2F | F.05 | Windows | works | not tested |
 | Victus 15-fb3xxx | (not reported) | (not reported) | Windows | works | slow charge (rate not reported) |
 | HP Laptop 15s-du4xxx | 89A1 | F.69 | Windows 11 | reported working, occasional small energy increases | +230 mWh in 4 min off; longer test pending; hold adds +500 mWh in 10 min while running ([#3](https://github.com/kralonur/hp-charge-limit-rs/issues/3)) |
+| HP Laptop 15s-du4xxx | 89A1 | F.69 | Linux | works: +0 mWh in 5 min | off test not reported; hold adds +230 mWh in 5 min while running (about 2.76 W) |
 
 Your model is missing or behaves differently? Please
 [open an issue](https://github.com/kralonur/hp-charge-limit-rs/issues)
@@ -157,11 +164,20 @@ the limitations described below.
 
 ## Install
 
-Requires Linux, systemd for the service, and the `acpi_call` module built for
-your running kernel. Install the module using your distribution's packages;
+Requires Linux, systemd for the service, ACPICA's `iasl` executable in PATH,
+and the `acpi_call` module built for your running kernel. Install ACPICA
+with `sudo pacman -S acpica` on Arch or `sudo apt install acpica-tools` on
+Debian/Ubuntu. Install the module using your distribution's packages;
 DKMS packages also need matching kernel headers. Firmware access requires
 root. Some module packages, including Arch's `acpi_call`, already configure
 loading at boot; no additional module-load file is needed in that case.
+
+Signature discovery uses a private temporary directory, never loads generated
+AML, and allows up to 60 seconds for `iasl` subprocesses. Successful discovery
+is cached for the lifetime of the process, not across restarts or BIOS updates;
+failed discovery can be retried. Restart the daemon if ACPI tables change after
+discovery. Other firmware or ACPICA versions may fail disassembly/compilation;
+such failures block charge-control calls rather than guessing an interface.
 
 Power supplies are discovered under `/sys/class/power_supply` by type,
 ignoring peripherals marked `scope=Device`. One present battery is
@@ -176,7 +192,7 @@ on each read to handle hotplug. Discovery does not establish firmware compatibil
 and matching `.tar.gz.sha256` from this repository's GitHub Releases page.
 Choose `x86_64-unknown-linux-musl` for x86_64 PCs or
 `aarch64-unknown-linux-musl` for ARM64 Linux. These are static binaries;
-you still need the kernel module and compatible firmware.
+you still need `iasl`, the kernel module, and compatible firmware.
 
 For example, for an x86_64 release (set `name` to the archive you downloaded,
 without `.tar.gz`):
@@ -258,6 +274,8 @@ You can also remove the `acpi_call` module package if nothing else uses it.
 
 Choose one of these instead of the manual installation. Both packages
 depend on `acpi_call`; choose a module package appropriate for your kernel.
+This checkout also requires `acpica` for `iasl`; install it explicitly if your
+AUR package version does not yet include the dependency.
 
 - [`hp-charge-limit-rs-bin`](https://aur.archlinux.org/packages/hp-charge-limit-rs-bin):
   prebuilt static binary from the GitHub Release, for x86_64 and ARM64. No Rust
@@ -501,9 +519,9 @@ nonzero exit status. An inactive/missing service or unavailable systemd is only
 a warning, since manual commands do not require the service.
 
 No charge modes are set, modules loaded, or services changed. Firmware readback
-still issues a GBCC query through `/proc/acpi/call` (requiring write access),
-not an SBCC mode-setting call. Running without sudo can report permission
-failures. Successful diagnostics do not prove firmware compatibility or actual
+first discovers signatures with `iasl`, then issues a GBCC or GBCO query
+through `/proc/acpi/call` (requiring write access), not a mode-setting call.
+Running without sudo can report permission failures. Successful diagnostics do not prove firmware compatibility or actual
 charge blocking.
 
 ### Desktop notifications
@@ -705,7 +723,7 @@ removed before rerunning its publishing job.
 |---|---|
 | `cli` | clap definitions, defaults as named constants |
 | `daemon/` | `mod.rs` loop: waits on a control channel with the poll interval as timeout; `limiter` the charge band state machine and exit policy; `linux` signals, `windows` service/console control |
-| `firmware/` | `Mode`/`Reported`, `ChargeControl` trait (implemented by `Wmi`); `acpi_call` SBCC command building, GBCC parsing, transport (lock, single read); `hpqbint` the Windows `hpqBIntM` call |
+| `firmware/` | `Mode`/`Reported`, `ChargeControl` trait (implemented by `Wmi`); `acpi_call` command building, reply validation, transport (lock, single read); `acpi_call/signature` offline Linux signature discovery; `hpqbint` the Windows `hpqBIntM` call |
 | `power/` | `Energy`/`Voltage` unit types; `sysfs` (Linux) and `windows` battery/AC readings |
 | `offstate` | energy record across shutdown |
 | `bypass` | temporary bypass flag shared by the CLI and daemon (file under `/run`; volatile registry key on Windows) |
@@ -722,8 +740,9 @@ and is retried on the next AC-powered poll if the threshold condition still
 holds. If a startup write fails, initialization is retried on each AC-powered
 poll, including between thresholds. Each retry uses the current capacity and
 bypass request to select the mode. After a successful write, normal hysteresis
-resumes. Successful writes mean the ACPI call returned without an
-`acpi_call` error, not independent verification of charge flow. `finish`
+resumes. Successful Linux writes mean the ACPI call and its firmware status
+reported no error. Some setters always return zero, even for ignored writes;
+success does not independently verify the requested mode or charge flow. `finish`
 consumes the limiter, so nothing ticks after it.
 
 ## Verification and limitations

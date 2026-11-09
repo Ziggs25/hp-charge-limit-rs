@@ -8,8 +8,7 @@ use super::Event;
 use crate::firmware::Mode;
 use clap::ValueEnum;
 use std::time::{Duration, Instant};
-use zbus::Message;
-use zbus::blocking::Connection;
+use zbus::{Connection, Message, block_on};
 
 pub const NAME: &str = "io.github.kralonur.HpChargeLimit";
 pub const PATH: &str = "/io/github/kralonur/HpChargeLimit";
@@ -34,12 +33,21 @@ impl Event {
         let header = msg.header();
         let body = msg.body();
         let event = match header.member()?.as_str() {
-            "LimitReached" => Event::LimitReached { capacity: body.deserialize::<(u8,)>().ok()?.0 },
-            "ChargingResumed" => Event::ChargingResumed { capacity: body.deserialize::<(u8,)>().ok()?.0 },
-            "BypassChanged" => Event::BypassChanged { enabled: body.deserialize::<(bool,)>().ok()?.0 },
+            "LimitReached" => Event::LimitReached {
+                capacity: body.deserialize::<(u8,)>().ok()?.0,
+            },
+            "ChargingResumed" => Event::ChargingResumed {
+                capacity: body.deserialize::<(u8,)>().ok()?.0,
+            },
+            "BypassChanged" => Event::BypassChanged {
+                enabled: body.deserialize::<(bool,)>().ok()?.0,
+            },
             "WriteFailed" => {
                 let (mode, error): (String, String) = body.deserialize().ok()?;
-                Event::WriteFailed { mode: Mode::from_str(&mode, false).ok()?, error }
+                Event::WriteFailed {
+                    mode: Mode::from_str(&mode, false).ok()?,
+                    error,
+                }
             }
             _ => return None,
         };
@@ -48,9 +56,11 @@ impl Event {
 
     /// The broadcast signal carrying this event; `parse` reverses it.
     fn message(&self) -> zbus::Result<Message> {
-        let signal = Message::signal(PATH, INTERFACE, self.signal())?;
+        let signal = Message::signal(PATH, INTERFACE, self.signal());
         match self {
-            Event::LimitReached { capacity } | Event::ChargingResumed { capacity } => signal.build(&(*capacity,)),
+            Event::LimitReached { capacity } | Event::ChargingResumed { capacity } => {
+                signal.build(&(*capacity,))
+            }
             Event::BypassChanged { enabled } => signal.build(&(*enabled,)),
             Event::WriteFailed { mode, error } => signal.build(&(mode.to_string(), error.as_str())),
         }
@@ -65,14 +75,19 @@ pub struct Emitter {
 
 impl Emitter {
     pub fn new() -> Self {
-        let mut emitter = Emitter { bus: None, next_try: Instant::now(), reported_down: false };
+        let mut emitter = Emitter {
+            bus: None,
+            next_try: Instant::now(),
+            reported_down: false,
+        };
         emitter.connect();
         emitter
     }
 
     fn connect(&mut self) {
-        let attempt = Connection::system().and_then(|bus| {
-            bus.request_name(NAME)?;
+        let attempt: zbus::Result<Connection> = block_on(async {
+            let bus = Connection::system().await?;
+            bus.request_name(NAME).await?;
             Ok(bus)
         });
         match attempt {
@@ -104,7 +119,7 @@ impl Emitter {
             self.connect();
         }
         let Some(bus) = &self.bus else { return };
-        if let Err(e) = event.message().and_then(|msg| bus.send(&msg)) {
+        if let Err(e) = event.message().and_then(|msg| block_on(bus.send(&msg))) {
             eprintln!("D-Bus: {} not sent: {e}", event.signal());
             self.bus = None;
             self.next_try = Instant::now() + RETRY_AFTER;

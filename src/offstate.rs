@@ -21,8 +21,17 @@ struct Record {
 
 impl Record {
     fn to_line(&self) -> String {
-        let secs = self.at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        format!("{secs} {} {} {}\n", self.energy.uwh(), self.capacity, self.action)
+        let secs = self
+            .at
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!(
+            "{secs} {} {} {}\n",
+            self.energy.uwh(),
+            self.capacity,
+            self.action
+        )
     }
 
     fn parse(line: &str) -> Option<Self> {
@@ -43,8 +52,15 @@ fn last_path() -> PathBuf {
 }
 
 pub fn save(capacity: u8, action: &str) {
-    let Some(energy) = power::energy() else { return };
-    let record = Record { at: SystemTime::now(), energy, capacity, action: action.into() };
+    let Some(energy) = power::energy() else {
+        return;
+    };
+    let record = Record {
+        at: SystemTime::now(),
+        energy,
+        capacity,
+        action: action.into(),
+    };
     let path = paths::at(OFF_STATE);
     if let Err(e) = paths::ensure_dir_for(&path) {
         eprintln!("off-state not saved: {e:#}");

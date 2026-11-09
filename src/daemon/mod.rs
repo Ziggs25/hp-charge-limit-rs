@@ -18,9 +18,9 @@ use self::linux as platform;
 use self::windows as platform;
 
 use crate::cli::DaemonOpts;
-use crate::events::Event;
 #[cfg(target_os = "linux")]
 use crate::events::Emitter;
+use crate::events::Event;
 use crate::firmware::Wmi;
 use crate::{bypass, offstate, power};
 use anyhow::Result;
@@ -74,9 +74,17 @@ impl Publisher {
 
 fn exit_policy(o: &DaemonOpts) -> ExitPolicy {
     if bypass::enabled() {
-        ExitPolicy { off_mode: StopAction::Auto, off_min: o.off_min, stop_mode: StopAction::Auto }
+        ExitPolicy {
+            off_mode: StopAction::Auto,
+            off_min: o.off_min,
+            stop_mode: StopAction::Auto,
+        }
     } else {
-        ExitPolicy { off_mode: o.off_mode, off_min: o.off_min, stop_mode: o.stop_mode }
+        ExitPolicy {
+            off_mode: o.off_mode,
+            off_min: o.off_min,
+            stop_mode: o.stop_mode,
+        }
     }
 }
 
@@ -108,7 +116,11 @@ fn run_loop(o: &DaemonOpts, controls: Receiver<Control>) -> Result<()> {
         println!("{line}");
     }
 
-    let band = Band { stop: o.stop, start: o.start, run_mode: o.run_mode };
+    let band = Band {
+        stop: o.stop,
+        start: o.start,
+        run_mode: o.run_mode,
+    };
     let interval = Duration::from_secs(o.interval);
     let mut wmi = Wmi;
     let mut publisher = Publisher::new(o);

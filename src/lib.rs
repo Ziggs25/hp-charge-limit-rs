@@ -9,10 +9,10 @@
 //!            but LED and sysfs status say "Charging"
 //! Only these three are ever written: never discharge or battery ship mode.
 
-pub mod cli;
 #[cfg(windows)]
 mod acl;
 mod bypass;
+pub mod cli;
 mod daemon;
 mod diagnose;
 mod events;
@@ -31,8 +31,8 @@ mod wmi;
 compile_error!("hp-charge-limit-rs supports Linux and Windows only");
 
 use anyhow::Result;
-use cli::{Cli, Cmd};
 use clap::CommandFactory;
+use cli::{Cli, Cmd};
 use firmware::{ChargeControl, Wmi};
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -40,7 +40,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Status { watch } => status::show(watch),
         Cmd::Diagnose => diagnose::run(),
         #[cfg(target_os = "linux")]
-        Cmd::Notify => notify::run(),
+        Cmd::Notify => zbus::block_on(notify::run()),
         Cmd::Set { mode } => {
             let mut wmi = Wmi;
             wmi.set(mode)?;
@@ -56,7 +56,12 @@ pub fn run(cli: Cli) -> Result<()> {
         },
         Cmd::Completions { shell } => {
             let mut command = Cli::command();
-            clap_complete::generate(shell, &mut command, "hp-charge-limit-rs", &mut std::io::stdout());
+            clap_complete::generate(
+                shell,
+                &mut command,
+                "hp-charge-limit-rs",
+                &mut std::io::stdout(),
+            );
             Ok(())
         }
     }

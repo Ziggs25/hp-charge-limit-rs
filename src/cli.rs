@@ -17,7 +17,10 @@ const MIN_INTERVAL_SECS: u64 = 5;
 const DEFAULT_OFF_MIN: u8 = 40;
 
 #[derive(Parser)]
-#[command(version, about = "Battery charge limiter using the HP WMI charge-control method SBCC")]
+#[command(
+    version,
+    about = "Battery charge limiter using the HP WMI charge-control method SBCC"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub cmd: Cmd,
@@ -105,7 +108,12 @@ pub struct DaemonOpts {
 
 impl DaemonOpts {
     pub fn validate(&self) -> Result<()> {
-        ensure!(self.start < self.stop, "--start ({}) must be below --stop ({})", self.start, self.stop);
+        ensure!(
+            self.start < self.stop,
+            "--start ({}) must be below --stop ({})",
+            self.start,
+            self.stop
+        );
         Ok(())
     }
 

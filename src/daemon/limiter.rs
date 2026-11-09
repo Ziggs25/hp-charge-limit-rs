@@ -56,7 +56,10 @@ impl Limiter {
             Err(e) => {
                 let error = format!("{e:#}");
                 if !self.failing {
-                    self.events.push(Event::WriteFailed { mode, error: error.clone() });
+                    self.events.push(Event::WriteFailed {
+                        mode,
+                        error: error.clone(),
+                    });
                 }
                 self.failing = true;
                 Err(error)
@@ -65,7 +68,13 @@ impl Limiter {
     }
 
     /// Sets `mode` and logs `<label>: cap=..% -> <mode>`; true if it took.
-    fn write(&mut self, fw: &mut impl ChargeControl, mode: Mode, label: &str, capacity: u8) -> bool {
+    fn write(
+        &mut self,
+        fw: &mut impl ChargeControl,
+        mode: Mode,
+        label: &str,
+        capacity: u8,
+    ) -> bool {
         match self.attempt(fw, mode) {
             Ok(()) => {
                 println!("{label}: cap={capacity}% -> {mode}");
@@ -94,7 +103,12 @@ impl Limiter {
     /// Always sets a mode, replacing whatever was left (e.g. hold from the
     /// last shutdown); above `start` it keeps limiting unless bypassed.
     pub fn start(band: Band, capacity: u8, bypass: bool, fw: &mut impl ChargeControl) -> Self {
-        let mut limiter = Limiter { band, state: State::Starting, events: Vec::new(), failing: false };
+        let mut limiter = Limiter {
+            band,
+            state: State::Starting,
+            events: Vec::new(),
+            failing: false,
+        };
         limiter.enter(capacity, bypass, fw);
         limiter
     }
@@ -151,7 +165,11 @@ impl Limiter {
             self.enter(capacity, bypass, fw);
             return;
         }
-        let Band { stop, start, run_mode } = self.band;
+        let Band {
+            stop,
+            start,
+            run_mode,
+        } = self.band;
         match self.state {
             State::Charging if capacity >= stop => {
                 if self.write(fw, run_mode, "limit", capacity) {
@@ -167,13 +185,23 @@ impl Limiter {
                 }
             }
             State::Limiting if capacity >= stop => self.reassert(fw, run_mode),
-            State::Starting | State::Charging | State::Limiting | State::Bypassed | State::Suspended { .. } => {}
+            State::Starting
+            | State::Charging
+            | State::Limiting
+            | State::Bypassed
+            | State::Suspended { .. } => {}
         }
     }
 
     /// Sets the mode `policy` picks for `exit`; returns that mode, or None
     /// if the mode was kept (by policy, or because the write failed).
-    fn leave(&mut self, exit: Exit, policy: &ExitPolicy, capacity: u8, fw: &mut impl ChargeControl) -> Option<Mode> {
+    fn leave(
+        &mut self,
+        exit: Exit,
+        policy: &ExitPolicy,
+        capacity: u8,
+        fw: &mut impl ChargeControl,
+    ) -> Option<Mode> {
         let label = exit.label();
         match policy.mode(exit, capacity) {
             Some(mode) => self.write(fw, mode, label, capacity).then_some(mode),
@@ -186,7 +214,13 @@ impl Limiter {
 
     /// Ends the limiter with the mode `policy` picks for `exit`; returns
     /// that mode, or None if the mode was kept.
-    pub fn finish(mut self, exit: Exit, policy: &ExitPolicy, capacity: u8, fw: &mut impl ChargeControl) -> Option<Mode> {
+    pub fn finish(
+        mut self,
+        exit: Exit,
+        policy: &ExitPolicy,
+        capacity: u8,
+        fw: &mut impl ChargeControl,
+    ) -> Option<Mode> {
         self.leave(exit, policy, capacity, fw)
     }
 
@@ -195,7 +229,12 @@ impl Limiter {
     /// a shutdown. Ticks change nothing until `resume`, or until a second
     /// tick shows the resume event was missed.
     #[cfg_attr(not(windows), allow(dead_code))]
-    pub fn suspend(&mut self, policy: &ExitPolicy, capacity: u8, fw: &mut impl ChargeControl) -> Option<Mode> {
+    pub fn suspend(
+        &mut self,
+        policy: &ExitPolicy,
+        capacity: u8,
+        fw: &mut impl ChargeControl,
+    ) -> Option<Mode> {
         let left = self.leave(Exit::Suspend, policy, capacity, fw);
         self.state = State::Suspended { ticked: false };
         left
@@ -268,10 +307,13 @@ impl ExitPolicy {
     fn mode(&self, exit: Exit, capacity: u8) -> Option<Mode> {
         match exit {
             Exit::ServiceStop => self.stop_mode.mode(),
-            Exit::Shutdown | Exit::Suspend => self
-                .off_mode
-                .mode()
-                .map(|mode| if capacity <= self.off_min { Mode::Auto } else { mode }),
+            Exit::Shutdown | Exit::Suspend => self.off_mode.mode().map(|mode| {
+                if capacity <= self.off_min {
+                    Mode::Auto
+                } else {
+                    mode
+                }
+            }),
         }
     }
 }

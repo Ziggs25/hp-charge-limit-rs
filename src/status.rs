@@ -14,7 +14,10 @@ const ENERGY_RESOLUTION: Energy = Energy::from_mwh(10);
 
 pub fn show(watch_secs: Option<u64>) -> Result<()> {
     let unknown = || "?".to_string();
-    println!("AC:       {}", if power::on_ac() { "online" } else { "offline" });
+    println!(
+        "AC:       {}",
+        if power::on_ac() { "online" } else { "offline" }
+    );
     println!(
         "battery:  {}%  {}  {}  {}",
         power::capacity().map_or_else(unknown, |c| c.to_string()),
@@ -33,17 +36,30 @@ pub fn show(watch_secs: Option<u64>) -> Result<()> {
         power::cycles().map_or_else(unknown, |c| c.to_string()),
         power::power_watts().map_or_else(unknown, |p| format!("{p:.2} W")),
     );
-    println!("bypass:   {}", if bypass::enabled() { "enabled (requested)" } else { "disabled" });
+    println!(
+        "bypass:   {}",
+        if bypass::enabled() {
+            "enabled (requested)"
+        } else {
+            "disabled"
+        }
+    );
     match Wmi.read() {
         Ok(mode) => {
             println!("firmware: {mode}");
             if mode.is_hold() {
-                println!("          (in hold, LED and status show charging; some boards still charge slowly: check with --watch)");
+                println!(
+                    "          (in hold, LED and status show charging; some boards still charge slowly: check with --watch)"
+                );
             }
         }
         Err(e) => println!("firmware: unreadable: {e:#}"),
     }
-    println!("service:  {} {}", service::SERVICE, service::service_state());
+    println!(
+        "service:  {} {}",
+        service::SERVICE,
+        service::service_state()
+    );
     if let Some(line) = offstate::last() {
         println!("last off: {line}");
     }
@@ -62,7 +78,11 @@ fn watch(span: Duration) -> Result<()> {
     while t0.elapsed() < span {
         sleep(WATCH_SAMPLE);
         let e = power::energy().unwrap_or(start);
-        println!("  +{:>3} s  {e}  ({:+} mWh)", t0.elapsed().as_secs(), (e - start).mwh());
+        println!(
+            "  +{:>3} s  {e}  ({:+} mWh)",
+            t0.elapsed().as_secs(),
+            (e - start).mwh()
+        );
     }
     let delta = power::energy().unwrap_or(start) - start;
     let verdict = if delta.abs() <= ENERGY_RESOLUTION {
@@ -72,6 +92,10 @@ fn watch(span: Duration) -> Result<()> {
     } else {
         "DISCHARGING"
     };
-    println!("result: {verdict} ({:+} mWh in {} s)", delta.mwh(), span.as_secs());
+    println!(
+        "result: {verdict} ({:+} mWh in {} s)",
+        delta.mwh(),
+        span.as_secs()
+    );
     Ok(())
 }

@@ -76,4 +76,3 @@ pub struct Reading {
     pub capacity: u8,
     pub on_ac: bool,
 }
-

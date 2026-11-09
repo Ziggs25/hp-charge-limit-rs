@@ -5,18 +5,19 @@ use anyhow::{Context, Result, anyhow, bail};
 use std::mem::ManuallyDrop;
 use std::sync::Once;
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoInitializeSecurity,
-    CoSetProxyBlanket, CoTaskMemFree, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_AUTHN_LEVEL_DEFAULT,
-    RPC_C_IMP_LEVEL_IMPERSONATE,
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    CoInitializeSecurity, CoSetProxyBlanket, CoTaskMemFree, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
+    RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
 };
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Variant::{
     InitVariantFromBuffer, VARIANT, VT_BOOL, VT_EMPTY, VT_I4, VT_NULL, VT_UNKNOWN, VariantClear,
-    VariantGetElementCount, VariantToBoolean, VariantToBuffer, VariantToInt32, VariantToStringAlloc, VariantToUInt32,
+    VariantGetElementCount, VariantToBoolean, VariantToBuffer, VariantToInt32,
+    VariantToStringAlloc, VariantToUInt32,
 };
 use windows::Win32::System::Wmi::{
-    IWbemClassObject, IWbemLocator, IWbemServices, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY,
-    WBEM_FLAG_RETURN_WBEM_COMPLETE, WBEM_INFINITE, WbemLocator,
+    IWbemClassObject, IWbemLocator, IWbemServices, WBEM_FLAG_FORWARD_ONLY,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_FLAG_RETURN_WBEM_COMPLETE, WBEM_INFINITE, WbemLocator,
 };
 use windows::core::{BSTR, IUnknown, Interface, PCWSTR};
 
@@ -72,11 +73,19 @@ impl Namespace {
     pub fn connect(namespace: &str) -> Result<Self> {
         init_com()?;
         unsafe {
-            let locator: IWbemLocator =
-                CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).context("WMI locator")?;
+            let locator: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER)
+                .context("WMI locator")?;
             let empty = BSTR::new();
             let services = locator
-                .ConnectServer(&BSTR::from(namespace), &empty, &empty, &empty, 0, &empty, None)
+                .ConnectServer(
+                    &BSTR::from(namespace),
+                    &empty,
+                    &empty,
+                    &empty,
+                    0,
+                    &empty,
+                    None,
+                )
                 .map_err(|e| failed(e, format!("connect to WMI namespace {namespace}")))?;
             CoSetProxyBlanket(
                 &services,
@@ -109,7 +118,9 @@ impl Namespace {
             loop {
                 let mut row = [None];
                 let mut returned = 0;
-                rows.Next(WBEM_INFINITE, &mut row, &mut returned).ok().map_err(|e| failed(e, wql.to_string()))?;
+                rows.Next(WBEM_INFINITE, &mut row, &mut returned)
+                    .ok()
+                    .map_err(|e| failed(e, wql.to_string()))?;
                 match row {
                     [Some(object)] if returned > 0 => found.push(Object(object)),
                     _ => break,
@@ -121,7 +132,10 @@ impl Namespace {
 
     /// The first instance of `class`, if any.
     pub fn first(&self, class: &str) -> Result<Option<Object>> {
-        Ok(self.query(&format!("SELECT * FROM {class}"))?.into_iter().next())
+        Ok(self
+            .query(&format!("SELECT * FROM {class}"))?
+            .into_iter()
+            .next())
     }
 
     /// A class definition, for spawning instances and method parameters.
@@ -129,10 +143,18 @@ impl Namespace {
         let mut object = None;
         unsafe {
             self.0
-                .GetObject(&BSTR::from(name), WBEM_FLAG_RETURN_WBEM_COMPLETE, None, Some(&mut object), None)
+                .GetObject(
+                    &BSTR::from(name),
+                    WBEM_FLAG_RETURN_WBEM_COMPLETE,
+                    None,
+                    Some(&mut object),
+                    None,
+                )
                 .with_context(|| format!("WMI class {name}"))?;
         }
-        object.map(Object).ok_or_else(|| anyhow!("WMI class {name} missing"))
+        object
+            .map(Object)
+            .ok_or_else(|| anyhow!("WMI class {name} missing"))
     }
 
     /// Runs `method` on the object at `path`; returns its out-parameters.
@@ -140,10 +162,20 @@ impl Namespace {
         let mut output = None;
         unsafe {
             self.0
-                .ExecMethod(&BSTR::from(path), &BSTR::from(method), Default::default(), None, &input.0, Some(&mut output), None)
+                .ExecMethod(
+                    &BSTR::from(path),
+                    &BSTR::from(method),
+                    Default::default(),
+                    None,
+                    &input.0,
+                    Some(&mut output),
+                    None,
+                )
                 .map_err(|e| failed(e, format!("WMI method {method}")))?;
         }
-        output.map(Object).ok_or_else(|| anyhow!("WMI method {method} returned nothing"))
+        output
+            .map(Object)
+            .ok_or_else(|| anyhow!("WMI method {method} returned nothing"))
     }
 }
 
@@ -152,7 +184,12 @@ pub struct Object(IWbemClassObject);
 
 impl Object {
     pub fn spawn(&self) -> Result<Object> {
-        unsafe { self.0.SpawnInstance(0).map(Object).context("spawn WMI instance") }
+        unsafe {
+            self.0
+                .SpawnInstance(0)
+                .map(Object)
+                .context("spawn WMI instance")
+        }
     }
 
     /// A fresh in-parameters instance for `method` of this class.
@@ -164,7 +201,10 @@ impl Object {
                 .GetMethod(PCWSTR(name.as_ptr()), 0, &mut input, std::ptr::null_mut())
                 .with_context(|| format!("WMI method {method} signature"))?;
         }
-        input.map(Object).ok_or_else(|| anyhow!("WMI method {method} takes no input"))?.spawn()
+        input
+            .map(Object)
+            .ok_or_else(|| anyhow!("WMI method {method} takes no input"))?
+            .spawn()
     }
 
     pub fn get(&self, name: &str) -> Result<Variant> {
@@ -180,7 +220,11 @@ impl Object {
 
     pub fn put(&self, name: &str, value: &Variant) -> Result<()> {
         let wide = BSTR::from(name);
-        unsafe { self.0.Put(PCWSTR(wide.as_ptr()), 0, &value.0, 0).with_context(|| format!("set WMI property {name}")) }
+        unsafe {
+            self.0
+                .Put(PCWSTR(wide.as_ptr()), 0, &value.0, 0)
+                .with_context(|| format!("set WMI property {name}"))
+        }
     }
 
     /// `__RELPATH`, the object's address within its namespace, for
@@ -311,7 +355,14 @@ impl Variant {
             bail!("value is not an object (VARTYPE {})", self.vt());
         }
         unsafe {
-            let unknown = self.0.Anonymous.Anonymous.Anonymous.punkVal.as_ref().ok_or_else(|| anyhow!("null object"))?;
+            let unknown = self
+                .0
+                .Anonymous
+                .Anonymous
+                .Anonymous
+                .punkVal
+                .as_ref()
+                .ok_or_else(|| anyhow!("null object"))?;
             Ok(Object(unknown.cast()?))
         }
     }

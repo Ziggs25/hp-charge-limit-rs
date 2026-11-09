@@ -1,5 +1,5 @@
 //! Linux backend: calls `\_SB.WMID.SBCC`/`GBCC` directly through the
-//! acpi_call module, or `SBCO`/`GBCO` when `GBCC` is absent.
+//! acpi_call module, preferring `SBCO`/`GBCO` when available.
 
 use super::{Mode, Reported, mode_data};
 use crate::paths::{self, ACPI_CALL, LOCK};
@@ -7,23 +7,36 @@ use anyhow::{Context, Result, anyhow, ensure};
 use std::fs::{self, File};
 use std::io::Read;
 
+mod signature;
+
 const SBCC: &str = r"\_SB.WMID.SBCC";
 const GBCC: &str = r"\_SB.WMID.GBCC";
 const SBCO: &str = r"\_SB.WMID.SBCO";
 const GBCO: &str = r"\_SB.WMID.GBCO";
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Interface {
     Sbcc,
-    Sbco,
+    SbcoPacked,
+    SbcoBytes,
 }
 
 impl Interface {
+    fn getter(self) -> &'static str {
+        match self {
+            Self::Sbcc => GBCC,
+            Self::SbcoPacked | Self::SbcoBytes => GBCO,
+        }
+    }
+
     fn command(self, mode: Mode) -> String {
         match self {
             Self::Sbcc => sbcc_command(mode),
-            // Unlike SBCC, SBCO takes the mode integer, not a WMI buffer.
-            Self::Sbco => format!("{SBCO} {:#x}", mode as u32),
+            Self::SbcoPacked => format!("{SBCO} {:#x}", mode as u32),
+            Self::SbcoBytes => {
+                let [a, b, c, d] = mode_data(mode);
+                format!("{SBCO} {a:#x} {b:#x} {c:#x} {d:#x}")
+            }
         }
     }
 }
@@ -46,12 +59,42 @@ fn sbcc_command(mode: Mode) -> String {
     format!("{SBCC} b{hex}")
 }
 
-/// GBCC replies e.g. `[0x0, 0x4, {0x03, 0xff, 0x01, 0x00}]`.
-fn parse_gbcc(reply: &str) -> Result<Reported> {
-    let bad = || anyhow!("unexpected GBCC reply {reply}");
-    let first = reply.split('{').nth(1).and_then(|s| s.split(',').next()).ok_or_else(bad)?;
-    let byte = u8::from_str_radix(first.trim().trim_start_matches("0x"), 16).map_err(|_| bad())?;
-    Ok(Reported(byte))
+struct Reply {
+    size: u32,
+    data: Option<[u8; 4]>,
+}
+
+/// Known replies are [status, size] or [status, size, {four bytes}].
+fn checked_reply(cmd: &str, reply: &str) -> Result<Reply> {
+    ensure!(!reply.starts_with(ACPI_ERROR_PREFIX), "{cmd}: {reply}");
+    let bad = || anyhow!("{cmd}: unexpected firmware reply {reply}");
+    let hex = |s: &str| -> Result<u32> {
+        u32::from_str_radix(s.trim().strip_prefix("0x").ok_or_else(bad)?, 16).map_err(|_| bad())
+    };
+    let mut fields = reply
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .ok_or_else(bad)?
+        .splitn(3, ',');
+    let status = hex(fields.next().ok_or_else(bad)?)?;
+    let size = hex(fields.next().ok_or_else(bad)?)?;
+    let data = fields
+        .next()
+        .map(|s| -> Result<[u8; 4]> {
+            let bytes = s
+                .trim()
+                .strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .ok_or_else(bad)?;
+            let bytes: Vec<u8> = bytes
+                .split(',')
+                .map(|s| u8::try_from(hex(s)?).map_err(|_| bad()))
+                .collect::<Result<_>>()?;
+            bytes.try_into().map_err(|_| bad())
+        })
+        .transpose()?;
+    ensure!(status == 0, "{cmd}: firmware status {status:#x}: {reply}");
+    Ok(Reply { size, data })
 }
 
 /// One ACPI method call through acpi_call; returns its reply text.
@@ -72,36 +115,59 @@ fn acpi_call(cmd: &str) -> Result<String> {
     Ok(reply.trim_matches(char::from(0)).trim().to_string())
 }
 
-fn check_reply(cmd: &str, reply: &str) -> Result<()> {
-    ensure!(!reply.starts_with(ACPI_ERROR_PREFIX), "{cmd}: {reply}");
+fn check_write_reply(interface: Interface, cmd: &str, reply: &str) -> Result<()> {
+    let parsed = checked_reply(cmd, reply)?;
+    ensure!(parsed.size == 0, "{cmd}: unexpected write reply {reply}");
+    match interface {
+        // SBCO(1) returns a two-element package, without a buffer.
+        Interface::SbcoPacked => ensure!(
+            parsed.data.is_none(),
+            "{cmd}: unexpected write reply {reply}"
+        ),
+        Interface::SbcoBytes => ensure!(
+            parsed.data.is_some(),
+            "{cmd}: missing status buffer: {reply}"
+        ),
+        // SBCC(1) on 8C99 returns [0, 0], without a buffer.
+        Interface::Sbcc => {}
+    }
+    if let Some(data) = parsed.data {
+        let status = u32::from_le_bytes(data);
+        ensure!(status == 0, "{cmd}: firmware status {status:#x}: {reply}");
+    }
     Ok(())
 }
 
-/// Select a matched read/write pair using reads only. Do not fall back on
-/// transport errors, other ACPI failures, or malformed firmware replies.
-fn detect(call: &mut impl FnMut(&str) -> Result<String>) -> Result<(Interface, Reported)> {
-    let reply = call(GBCC)?;
-    let (interface, cmd, reply) = if reply == "Error: AE_NOT_FOUND" {
-        (Interface::Sbco, GBCO, call(GBCO)?)
-    } else {
-        (Interface::Sbcc, GBCC, reply)
-    };
-    check_reply(cmd, &reply)?;
-    Ok((interface, parse_gbcc(&reply)?))
+fn read_with(
+    interface: Interface,
+    call: &mut impl FnMut(&str) -> Result<String>,
+) -> Result<Reported> {
+    let cmd = interface.getter();
+    let reply = call(cmd)?;
+    let parsed = checked_reply(cmd, &reply)?;
+    ensure!(parsed.size == 4, "{cmd}: unexpected read reply {reply}");
+    let data = parsed
+        .data
+        .ok_or_else(|| anyhow!("{cmd}: missing mode buffer: {reply}"))?;
+    Ok(Reported(data[0]))
 }
 
 pub(super) fn read() -> Result<Reported> {
-    detect(&mut acpi_call).map(|(_, reported)| reported)
+    read_with(signature::interface()?, &mut acpi_call)
 }
 
-fn set_with(mode: Mode, mut call: impl FnMut(&str) -> Result<String>) -> Result<()> {
-    // Detect even for standalone `set` commands; never discover an interface
-    // by writing, and never retry a failed write through another method.
-    let (interface, _) = detect(&mut call)?;
+fn set_with(
+    interface: Interface,
+    mode: Mode,
+    mut call: impl FnMut(&str) -> Result<String>,
+) -> Result<()> {
+    // Check the matched getter before writing. Never retry a failed read or
+    // write through another method, or discover an interface by writing.
+    read_with(interface, &mut call)?;
     let cmd = interface.command(mode);
-    check_reply(&cmd, &call(&cmd)?)
+    check_write_reply(interface, &cmd, &call(&cmd)?)
 }
 
 pub(super) fn set(mode: Mode) -> Result<()> {
-    set_with(mode, acpi_call)
+    set_with(signature::interface()?, mode, acpi_call)
 }

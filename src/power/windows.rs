@@ -24,7 +24,11 @@ fn system_status() -> Option<SYSTEM_POWER_STATUS> {
 
 /// The first instance of a `root\wmi` battery class.
 fn battery_class(class: &str) -> Option<Object> {
-    Namespace::connect(NAMESPACE).ok()?.first(class).ok().flatten()
+    Namespace::connect(NAMESPACE)
+        .ok()?
+        .first(class)
+        .ok()
+        .flatten()
 }
 
 /// An unknown flag (255) has the no-battery bit set too: not an answer.
@@ -38,11 +42,14 @@ pub fn present() -> bool {
 
 pub fn capacity() -> Option<u8> {
     let status = system_status()?;
-    (has_battery(&status) && status.BatteryLifePercent != UNKNOWN).then_some(status.BatteryLifePercent)
+    (has_battery(&status) && status.BatteryLifePercent != UNKNOWN)
+        .then_some(status.BatteryLifePercent)
 }
 
 pub fn energy() -> Option<Energy> {
-    battery_class("BatteryStatus")?.u32("RemainingCapacity").map(|mwh| Energy::from_mwh(mwh.into()))
+    battery_class("BatteryStatus")?
+        .u32("RemainingCapacity")
+        .map(|mwh| Energy::from_mwh(mwh.into()))
 }
 
 pub fn voltage() -> Option<Voltage> {
@@ -74,14 +81,21 @@ pub fn health() -> Option<f64> {
 }
 
 pub fn cycles() -> Option<u64> {
-    battery_class("BatteryCycleCount")?.u32("CycleCount").map(u64::from)
+    battery_class("BatteryCycleCount")?
+        .u32("CycleCount")
+        .map(u64::from)
 }
 
 /// Whichever of charge or discharge rate (mW, CIM sint32) is flowing; a
 /// driver may report it negative, or as i32::MIN when unknown.
 pub fn power_watts() -> Option<f64> {
     let battery = battery_class("BatteryStatus")?;
-    let rate = |name| battery.i32(name).filter(|&mw| mw != UNKNOWN_RATE).map_or(0, i32::unsigned_abs);
+    let rate = |name| {
+        battery
+            .i32(name)
+            .filter(|&mw| mw != UNKNOWN_RATE)
+            .map_or(0, i32::unsigned_abs)
+    };
     Some(f64::from(rate("ChargeRate").max(rate("DischargeRate"))) / MILLI_PER_UNIT)
 }
 
@@ -107,5 +121,8 @@ pub fn on_ac() -> bool {
 }
 
 pub fn reading() -> Option<Reading> {
-    Some(Reading { capacity: capacity()?, on_ac: on_ac() })
+    Some(Reading {
+        capacity: capacity()?,
+        on_ac: on_ac(),
+    })
 }

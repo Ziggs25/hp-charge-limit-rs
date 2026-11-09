@@ -23,7 +23,11 @@ fn termination() -> Result<Receiver<Control>> {
     let mut signals = Signals::new([SIGTERM, SIGINT])?;
     thread::spawn(move || {
         for _ in signals.forever() {
-            let exit = if service::system_stopping() { Exit::Shutdown } else { Exit::ServiceStop };
+            let exit = if service::system_stopping() {
+                Exit::Shutdown
+            } else {
+                Exit::ServiceStop
+            };
             if tx.send(Control::Exit(exit)).is_err() {
                 break;
             }

@@ -37,8 +37,8 @@ mod store {
     use anyhow::{Context, Result};
     use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
     use windows::Win32::System::Registry::{
-        HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_VOLATILE, RegCloseKey, RegCreateKeyExW,
-        RegDeleteKeyW, RegOpenKeyExW,
+        HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_VOLATILE, RegCloseKey,
+        RegCreateKeyExW, RegDeleteKeyW, RegOpenKeyExW,
     };
     use windows::core::{PCWSTR, w};
 
@@ -48,7 +48,8 @@ mod store {
 
     pub fn enabled() -> bool {
         let mut key = HKEY::default();
-        let found = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, KEY, None, KEY_READ, &mut key) }.is_ok();
+        let found =
+            unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, KEY, None, KEY_READ, &mut key) }.is_ok();
         if found {
             unsafe {
                 let _ = RegCloseKey(key);
@@ -60,9 +61,19 @@ mod store {
     pub fn on() -> Result<()> {
         let mut key = HKEY::default();
         unsafe {
-            RegCreateKeyExW(HKEY_LOCAL_MACHINE, KEY, None, PCWSTR::null(), REG_OPTION_VOLATILE, KEY_WRITE, None, &mut key, None)
-                .ok()
-                .with_context(|| format!("create {KEY_NAME} (run as administrator)"))?;
+            RegCreateKeyExW(
+                HKEY_LOCAL_MACHINE,
+                KEY,
+                None,
+                PCWSTR::null(),
+                REG_OPTION_VOLATILE,
+                KEY_WRITE,
+                None,
+                &mut key,
+                None,
+            )
+            .ok()
+            .with_context(|| format!("create {KEY_NAME} (run as administrator)"))?;
             let _ = RegCloseKey(key);
         }
         Ok(())
@@ -71,7 +82,9 @@ mod store {
     pub fn off() -> Result<()> {
         match unsafe { RegDeleteKeyW(HKEY_LOCAL_MACHINE, KEY) } {
             e if e.is_ok() || e == ERROR_FILE_NOT_FOUND => Ok(()),
-            e => e.ok().with_context(|| format!("delete {KEY_NAME} (run as administrator)")),
+            e => e
+                .ok()
+                .with_context(|| format!("delete {KEY_NAME} (run as administrator)")),
         }
     }
 }

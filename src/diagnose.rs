@@ -30,14 +30,23 @@ struct Machine {
 #[cfg(target_os = "linux")]
 fn machine() -> Machine {
     let dmi = |name: &str| paths::read_trimmed(&paths::at(&format!("/sys/class/dmi/id/{name}")));
-    Machine { vendor: dmi("sys_vendor"), model: dmi("product_name"), board: dmi("board_name"), bios: dmi("bios_version") }
+    Machine {
+        vendor: dmi("sys_vendor"),
+        model: dmi("product_name"),
+        board: dmi("board_name"),
+        bios: dmi("bios_version"),
+    }
 }
 
 #[cfg(windows)]
 fn machine() -> Machine {
     let cimv2 = crate::wmi::Namespace::connect(r"root\cimv2").ok();
     let first = |class: &str| cimv2.as_ref()?.first(class).ok().flatten();
-    let (system, board, bios) = (first("Win32_ComputerSystem"), first("Win32_BaseBoard"), first("Win32_BIOS"));
+    let (system, board, bios) = (
+        first("Win32_ComputerSystem"),
+        first("Win32_BaseBoard"),
+        first("Win32_BIOS"),
+    );
     Machine {
         vendor: system.as_ref().and_then(|o| o.string("Manufacturer")),
         model: system.as_ref().and_then(|o| o.string("Model")),
@@ -68,7 +77,9 @@ pub fn run() -> Result<()> {
     let mut ok = supplies();
     ok &= firmware();
     service();
-    println!("No charge modes changed. Readback does not prove firmware compatibility or charge blocking.");
+    println!(
+        "No charge modes changed. Readback does not prove firmware compatibility or charge blocking."
+    );
     ensure!(ok, "diagnostics found problems; see checks above");
     Ok(())
 }
@@ -86,7 +97,11 @@ fn supplies() -> bool {
         None => check(false, "battery", "no present system battery found"),
     };
     let adapters = power::adapters();
-    ok &= check(!adapters.is_empty(), "external power supplies", adapters.len());
+    ok &= check(
+        !adapters.is_empty(),
+        "external power supplies",
+        adapters.len(),
+    );
     for adapter in adapters {
         let (online, detail) = match paths::read_trimmed(&adapter.join("online")).as_deref() {
             Some("1") => (true, "online"),
@@ -100,7 +115,15 @@ fn supplies() -> bool {
 
 #[cfg(windows)]
 fn supplies() -> bool {
-    let mut ok = check(power::present(), "battery", if power::present() { "present" } else { "no system battery" });
+    let mut ok = check(
+        power::present(),
+        "battery",
+        if power::present() {
+            "present"
+        } else {
+            "no system battery"
+        },
+    );
     match power::capacity().filter(|&capacity| capacity <= 100) {
         Some(capacity) => ok &= check(true, "capacity", format!("{capacity}%")),
         None => ok &= check(false, "capacity", "unknown"),
@@ -112,8 +135,15 @@ fn supplies() -> bool {
     };
     ok &= check(ac.0, "AC adapter", ac.1);
     let details = power::energy().is_some();
-    report(if details { "ok" } else { "warn" }, "battery details (root\\wmi BatteryStatus)",
-        if details { "readable" } else { "unreadable; status shows less, limiting still works" });
+    report(
+        if details { "ok" } else { "warn" },
+        "battery details (root\\wmi BatteryStatus)",
+        if details {
+            "readable"
+        } else {
+            "unreadable; status shows less, limiting still works"
+        },
+    );
     ok
 }
 
@@ -121,14 +151,26 @@ fn supplies() -> bool {
 fn firmware() -> bool {
     let call = paths::at(paths::ACPI_CALL);
     if !call.exists() {
-        report("fail", "acpi_call", "interface missing; install/load acpi_call for the running kernel");
-        report("skip", "permissions and firmware readback", "ACPI interface missing");
+        report(
+            "fail",
+            "acpi_call",
+            "interface missing; install/load acpi_call for the running kernel",
+        );
+        report(
+            "skip",
+            "permissions and firmware readback",
+            "ACPI interface missing",
+        );
         return false;
     }
     report("ok", "acpi_call", "interface present");
     // Opening without truncate checks access without issuing an ACPI call.
     if let Err(e) = OpenOptions::new().read(true).write(true).open(&call) {
-        report("fail", "permissions", format!("{e}; try sudo hp-charge-limit-rs diagnose"));
+        report(
+            "fail",
+            "permissions",
+            format!("{e}; try sudo hp-charge-limit-rs diagnose"),
+        );
         report("skip", "firmware readback", "ACPI interface inaccessible");
         return false;
     }
@@ -151,7 +193,11 @@ fn firmware() -> bool {
     }
     match Wmi.read() {
         Ok(mode) => check(true, "firmware readback (command 1, type 0x2B)", mode),
-        Err(e) => check(false, "firmware readback (command 1, type 0x2B)", format!("{e:#}")),
+        Err(e) => check(
+            false,
+            "firmware readback (command 1, type 0x2B)",
+            format!("{e:#}"),
+        ),
     }
 }
 
@@ -159,7 +205,11 @@ fn firmware() -> bool {
 fn service() {
     let state = service::service_state();
     let mark = if state == "active" { "ok" } else { "warn" };
-    report(mark, "service", format!("{state} (optional for manual commands)"));
+    report(
+        mark,
+        "service",
+        format!("{state} (optional for manual commands)"),
+    );
     match service::service_config() {
         Some(config) => {
             println!("[info] service configuration (reported, not validated):");
@@ -167,6 +217,10 @@ fn service() {
                 println!("  {line}");
             }
         }
-        None => report("warn", "service configuration", "service not installed or query failed"),
+        None => report(
+            "warn",
+            "service configuration",
+            "service not installed or query failed",
+        ),
     }
 }

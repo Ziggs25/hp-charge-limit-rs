@@ -11,7 +11,9 @@ const MICRO_PER_UNIT: f64 = 1_000_000.0;
 /// Discover afresh so hotplugged supplies appear on the next read.
 /// Prefer BAT1 for compatibility, then use stable alphabetical ordering.
 fn supplies() -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(paths::at(POWER_SUPPLY)) else { return Vec::new() };
+    let Ok(entries) = fs::read_dir(paths::at(POWER_SUPPLY)) else {
+        return Vec::new();
+    };
     let mut supplies: Vec<_> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -37,11 +39,17 @@ pub fn capacity() -> Option<u8> {
 }
 
 pub fn energy() -> Option<Energy> {
-    battery_attr("energy_now")?.parse().ok().map(Energy::from_uwh)
+    battery_attr("energy_now")?
+        .parse()
+        .ok()
+        .map(Energy::from_uwh)
 }
 
 pub fn voltage() -> Option<Voltage> {
-    battery_attr("voltage_now")?.parse().ok().map(Voltage::from_uv)
+    battery_attr("voltage_now")?
+        .parse()
+        .ok()
+        .map(Voltage::from_uv)
 }
 
 pub fn status() -> Option<String> {
@@ -54,9 +62,13 @@ fn number(name: &str) -> Option<f64> {
 
 /// Full capacity relative to design capacity; charge-based batteries are supported too.
 pub fn health() -> Option<f64> {
-    for (full, design) in [("energy_full", "energy_full_design"), ("charge_full", "charge_full_design")] {
+    for (full, design) in [
+        ("energy_full", "energy_full_design"),
+        ("charge_full", "charge_full_design"),
+    ] {
         if let (Some(full), Some(design)) = (number(full), number(design))
-            && full >= 0.0 && design > 0.0
+            && full >= 0.0
+            && design > 0.0
         {
             return Some(full / design * 100.0);
         }
@@ -84,7 +96,8 @@ pub fn model() -> Option<String> {
 }
 
 pub fn adapters() -> Vec<PathBuf> {
-    supplies().into_iter()
+    supplies()
+        .into_iter()
         .filter(|path| {
             let kind = paths::read_trimmed(&path.join("type")).unwrap_or_default();
             matches!(kind.as_str(), "Mains" | "Wireless") || kind.starts_with("USB")
@@ -93,11 +106,14 @@ pub fn adapters() -> Vec<PathBuf> {
 }
 
 pub fn on_ac() -> bool {
-    adapters().into_iter().any(|path| {
-        paths::read_trimmed(&path.join("online")).as_deref() == Some(ADAPTER_ONLINE)
-    })
+    adapters()
+        .into_iter()
+        .any(|path| paths::read_trimmed(&path.join("online")).as_deref() == Some(ADAPTER_ONLINE))
 }
 
 pub fn reading() -> Option<Reading> {
-    Some(Reading { capacity: capacity()?, on_ac: on_ac() })
+    Some(Reading {
+        capacity: capacity()?,
+        on_ac: on_ac(),
+    })
 }

@@ -94,7 +94,10 @@ fn call(command: u32, data: &[u8], method: &str) -> Result<Result<Vec<u8>, u32>>
 
 fn bios_ok(command: u32, reply: Result<Vec<u8>, u32>) -> Result<Vec<u8>> {
     reply.map_err(|code| {
-        anyhow!("BIOS command {command} type {CHARGE_CONTROL:#04x}: return code {code} ({})", describe(code))
+        anyhow!(
+            "BIOS command {command} type {CHARGE_CONTROL:#04x}: return code {code} ({})",
+            describe(code)
+        )
     })
 }
 
@@ -107,7 +110,10 @@ pub(super) fn read() -> Result<Reported> {
         reply => reply,
     };
     let data = bios_ok(READ, reply)?;
-    let first = data.first().copied().ok_or_else(|| anyhow!("empty GBCC reply"))?;
+    let first = data
+        .first()
+        .copied()
+        .ok_or_else(|| anyhow!("empty GBCC reply"))?;
     Ok(Reported(first))
 }
 

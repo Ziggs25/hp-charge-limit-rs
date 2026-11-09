@@ -22,13 +22,17 @@ use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
-    CTRL_BREAK_EVENT, CTRL_C_EVENT, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler, SetStdHandle,
+    CTRL_BREAK_EVENT, CTRL_C_EVENT, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler,
+    SetStdHandle,
 };
 use windows::core::BOOL;
 use windows_service::service::{
-    PowerEventParam, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
+    PowerEventParam, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState,
+    ServiceStatus, ServiceType,
 };
-use windows_service::service_control_handler::{self, ServiceControlHandlerResult, ServiceStatusHandle};
+use windows_service::service_control_handler::{
+    self, ServiceControlHandlerResult, ServiceStatusHandle,
+};
 use windows_service::{define_windows_service, service_dispatcher};
 
 /// ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: not started by the SCM.
@@ -50,7 +54,9 @@ pub fn run(o: &DaemonOpts) -> Result<()> {
     let _ = OPTS.set(o.clone());
     match service_dispatcher::start(SERVICE, ffi_service_main) {
         Ok(()) => Ok(()),
-        Err(windows_service::Error::Winapi(e)) if e.raw_os_error() == Some(NOT_A_SERVICE) => console(o),
+        Err(windows_service::Error::Winapi(e)) if e.raw_os_error() == Some(NOT_A_SERVICE) => {
+            console(o)
+        }
         Err(e) => Err(e).context("service dispatcher"),
     }
 }
@@ -90,13 +96,18 @@ fn log_to_file() {
     if fs::metadata(&path).is_ok_and(|m| m.len() > LOG_MAX_BYTES) {
         let _ = fs::rename(&path, path.with_extension("log.old"));
     }
-    let Ok(out) = OpenOptions::new().create(true).append(true).open(&path) else { return };
+    let Ok(out) = OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
     let Ok(err) = out.try_clone() else { return };
     unsafe {
         let _ = SetStdHandle(STD_OUTPUT_HANDLE, HANDLE(out.into_raw_handle()));
         let _ = SetStdHandle(STD_ERROR_HANDLE, HANDLE(err.into_raw_handle()));
     }
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     println!("--- service start (unix time {secs})");
 }
 
@@ -112,7 +123,11 @@ fn status(state: ServiceState, accept: ServiceControlAccept, code: u32) -> Servi
         service_type: ServiceType::OWN_PROCESS,
         current_state: state,
         controls_accepted: accept,
-        exit_code: if code == 0 { ServiceExitCode::Win32(0) } else { ServiceExitCode::ServiceSpecific(code) },
+        exit_code: if code == 0 {
+            ServiceExitCode::Win32(0)
+        } else {
+            ServiceExitCode::ServiceSpecific(code)
+        },
         checkpoint: 0,
         wait_hint: Duration::default(),
         process_id: None,
@@ -142,27 +157,40 @@ fn run_service(o: &DaemonOpts) -> Result<()> {
         // cases. Limiting waits for a resume, so any of them counts (twice
         // is harmless).
         ServiceControl::PowerEvent(
-            PowerEventParam::ResumeAutomatic | PowerEventParam::ResumeSuspend | PowerEventParam::ResumeCritical,
+            PowerEventParam::ResumeAutomatic
+            | PowerEventParam::ResumeSuspend
+            | PowerEventParam::ResumeCritical,
         ) => {
             let _ = tx.send(Control::Resume);
             ServiceControlHandlerResult::NoError
         }
-        ServiceControl::PowerEvent(_) | ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+        ServiceControl::PowerEvent(_) | ServiceControl::Interrogate => {
+            ServiceControlHandlerResult::NoError
+        }
         _ => ServiceControlHandlerResult::NotImplemented,
     };
-    let handle: ServiceStatusHandle = service_control_handler::register(SERVICE, handler).context("register service")?;
+    let handle: ServiceStatusHandle =
+        service_control_handler::register(SERVICE, handler).context("register service")?;
     // Without a directory only SYSTEM and Administrators control, the
     // service writes nothing and does not run (see `acl`).
     let result = paths::secure_data_dir().and_then(|_| {
         log_to_file();
-        let accept = ServiceControlAccept::STOP | ServiceControlAccept::PRESHUTDOWN | ServiceControlAccept::POWER_EVENT;
-        handle.set_service_status(status(ServiceState::Running, accept, 0)).context("report running")?;
+        let accept = ServiceControlAccept::STOP
+            | ServiceControlAccept::PRESHUTDOWN
+            | ServiceControlAccept::POWER_EVENT;
+        handle
+            .set_service_status(status(ServiceState::Running, accept, 0))
+            .context("report running")?;
         super::run_loop(o, rx)
     });
     if let Err(e) = &result {
         eprintln!("daemon failed: {e:#}");
     }
     let code = if result.is_ok() { 0 } else { FAILED };
-    handle.set_service_status(status(ServiceState::Stopped, ServiceControlAccept::empty(), code))?;
+    handle.set_service_status(status(
+        ServiceState::Stopped,
+        ServiceControlAccept::empty(),
+        code,
+    ))?;
     result
 }

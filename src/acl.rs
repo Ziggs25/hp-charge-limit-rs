@@ -18,16 +18,17 @@ use std::path::Path;
 use std::ptr::null_mut;
 use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
-    SetNamedSecurityInfoW,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, SDDL_REVISION_1,
+    SE_FILE_OBJECT, SetNamedSecurityInfoW,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, WinBuiltinAdministratorsSid,
-    WinLocalSystemSid,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, IsWellKnownSid,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES, WinBuiltinAdministratorsSid, WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT, GetFileInformationByHandle,
+    BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT,
+    GetFileInformationByHandle,
 };
 use windows::core::{BOOL, HSTRING};
 
@@ -52,8 +53,15 @@ impl Drop for LocalDescriptor {
 
 fn descriptor(sddl: &str) -> Result<LocalDescriptor> {
     let mut sd = PSECURITY_DESCRIPTOR::default();
-    unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(&HSTRING::from(sddl), SDDL_REVISION_1, &mut sd, None) }
-        .context("build security descriptor")?;
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from(sddl),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        )
+    }
+    .context("build security descriptor")?;
     Ok(LocalDescriptor(sd))
 }
 
@@ -65,11 +73,25 @@ fn owner_trusted(path: &Path) -> Result<bool> {
     let mut owner = PSID::default();
     let mut sd = PSECURITY_DESCRIPTOR::default();
     let status = unsafe {
-        GetNamedSecurityInfoW(&wide(path), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, Some(&mut owner), None, None, None, &mut sd)
+        GetNamedSecurityInfoW(
+            &wide(path),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&mut owner),
+            None,
+            None,
+            None,
+            &mut sd,
+        )
     };
     let _sd = LocalDescriptor(sd);
-    status.ok().with_context(|| format!("read owner of {}", path.display()))?;
-    Ok(unsafe { IsWellKnownSid(owner, WinLocalSystemSid).as_bool() || IsWellKnownSid(owner, WinBuiltinAdministratorsSid).as_bool() })
+    status
+        .ok()
+        .with_context(|| format!("read owner of {}", path.display()))?;
+    Ok(unsafe {
+        IsWellKnownSid(owner, WinLocalSystemSid).as_bool()
+            || IsWellKnownSid(owner, WinBuiltinAdministratorsSid).as_bool()
+    })
 }
 
 fn is_reparse_point(meta: &fs::Metadata) -> bool {
@@ -79,7 +101,10 @@ fn is_reparse_point(meta: &fs::Metadata) -> bool {
 /// A file with more than one name: a hard link, maybe to a system file.
 fn is_hard_linked(path: &Path) -> Result<bool> {
     // no access rights: reads attributes of any file, never its data
-    let file = fs::OpenOptions::new().access_mode(0).open(path).with_context(|| path.display().to_string())?;
+    let file = fs::OpenOptions::new()
+        .access_mode(0)
+        .open(path)
+        .with_context(|| path.display().to_string())?;
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
         .with_context(|| path.display().to_string())?;
@@ -92,11 +117,27 @@ fn protect(path: &Path) -> Result<()> {
     let mut present = BOOL::default();
     let mut defaulted = BOOL::default();
     let mut dacl: *mut ACL = null_mut();
-    unsafe { GetSecurityDescriptorDacl(sd.0, &mut present, &mut dacl, &mut defaulted) }.context("read DACL")?;
+    unsafe { GetSecurityDescriptorDacl(sd.0, &mut present, &mut dacl, &mut defaulted) }
+        .context("read DACL")?;
     let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
-    unsafe { SetNamedSecurityInfoW(&wide(path), SE_FILE_OBJECT, info, None, None, Some(dacl), None) }
-        .ok()
-        .with_context(|| format!("set permissions on {} (run as administrator)", path.display()))
+    unsafe {
+        SetNamedSecurityInfoW(
+            &wide(path),
+            SE_FILE_OBJECT,
+            info,
+            None,
+            None,
+            Some(dacl),
+            None,
+        )
+    }
+    .ok()
+    .with_context(|| {
+        format!(
+            "set permissions on {} (run as administrator)",
+            path.display()
+        )
+    })
 }
 
 fn create(path: &Path) -> Result<()> {
@@ -118,7 +159,9 @@ fn no_links_inside(dir: &Path) -> Result<()> {
         let entry = entry.with_context(|| dir.display().to_string())?;
         let path = entry.path();
         // DirEntry metadata describes a link itself, not its target
-        let meta = entry.metadata().with_context(|| path.display().to_string())?;
+        let meta = entry
+            .metadata()
+            .with_context(|| path.display().to_string())?;
         ensure!(
             !is_reparse_point(&meta) && !(meta.is_file() && is_hard_linked(&path)?),
             "{} is a link this tool never creates; delete {} and retry",

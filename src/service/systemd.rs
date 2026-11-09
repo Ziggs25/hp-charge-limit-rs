@@ -29,5 +29,7 @@ pub fn service_config() -> Option<String> {
         .args(["show", "--no-pager", "--property=LoadState,UnitFileState,FragmentPath,DropInPaths,ExecStart,EnvironmentFiles", SERVICE])
         .output()
         .ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
