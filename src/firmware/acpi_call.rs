@@ -1,7 +1,7 @@
 //! Linux backend: calls `\_SB.WMID.SBCC`/`GBCC` directly through the
 //! acpi_call module.
 
-use super::{Mode, Reported, mode_data};
+use super::{Mode, Reported};
 use crate::paths::{self, ACPI_CALL, LOCK};
 use anyhow::{Context, Result, anyhow, ensure};
 use std::fs::{self, File};
@@ -9,10 +9,6 @@ use std::io::Read;
 
 const SBCC: &str = r"\_SB.WMID.SBCC";
 const GBCC: &str = r"\_SB.WMID.GBCC";
-/// SBCC takes the WMI request buffer WHCM would pass it: a 16-byte header
-/// (signature, command, type, size), then the mode dword.
-const SBCC_BUFFER_LEN: usize = 20;
-const SBCC_MODE_OFFSET: usize = 0x10;
 /// Larger than any reply of the methods we call.
 const ACPI_REPLY_MAX: usize = 4096;
 /// acpi_call reports failures as a reply text starting with this.
@@ -20,11 +16,12 @@ const ACPI_ERROR_PREFIX: &str = "Error";
 
 /// The method call that sets `mode`.
 fn sbcc_command(mode: Mode) -> String {
-    let mut buf = [0u8; SBCC_BUFFER_LEN];
-    let word = mode_data(mode);
-    buf[SBCC_MODE_OFFSET..SBCC_MODE_OFFSET + word.len()].copy_from_slice(&word);
-    let hex: String = buf.iter().map(|b| format!("{b:02x}")).collect();
-    format!("{SBCC} b{hex}")
+    let arg1 = match mode {
+        Mode::Auto => 0,
+        Mode::Inhibit => 1,
+        Mode::Hold => 2,
+    };
+    format!("{SBCC} 0x63 {arg1} 0 0")
 }
 
 /// GBCC replies e.g. `[0x0, 0x4, {0x03, 0xff, 0x01, 0x00}]`.

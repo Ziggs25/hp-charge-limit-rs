@@ -42,6 +42,7 @@ impl fmt::Display for Mode {
 }
 
 /// The 4 data bytes SBCC reads: the mode as a little-endian dword.
+#[allow(dead_code)]
 fn mode_data(mode: Mode) -> [u8; 4] {
     (mode as u32).to_le_bytes()
 }
@@ -88,8 +89,8 @@ impl Reported {
     pub fn matches(self, mode: Mode) -> bool {
         match mode {
             Mode::Auto => matches!(self.0, reported::AUTO | reported::CHARGING),
-            Mode::Inhibit => matches!(self.0, reported::INHIBIT | reported::INHIBIT_VARIANT),
-            Mode::Hold => self.is_hold(),
+            Mode::Inhibit => matches!(self.0, reported::INHIBIT | reported::INHIBIT_VARIANT | 1 | 2),
+            Mode::Hold => self.is_hold() || self.0 == 2,
         }
     }
 }
