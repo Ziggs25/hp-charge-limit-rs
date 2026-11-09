@@ -14,6 +14,9 @@ use crate::firmware::{ChargeControl, Mode};
 use crate::power::Reading;
 use clap::ValueEnum;
 use std::fmt;
+use std::time::{Duration, Instant};
+
+const VERIFY_EVERY: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Clone, Copy, Debug)]
 pub struct Band {
@@ -43,6 +46,8 @@ pub struct Limiter {
     events: Vec<Event>,
     /// The last firmware write failed; keeps a failing run to one event
     failing: bool,
+    last_on_ac: bool,
+    verify_at: Instant,
 }
 
 impl Limiter {
@@ -78,11 +83,37 @@ impl Limiter {
         }
     }
 
-    /// Re-set every cycle while in its zone: harmless when already set, and
-    /// repairs a mode changed behind our back.
-    fn reassert(&mut self, fw: &mut impl ChargeControl, mode: Mode) {
-        if let Err(e) = self.attempt(fw, mode) {
-            eprintln!("set {mode}: {e}");
+    /// Re-set the current mode after AC returns or verification disagrees.
+    fn reassert(&mut self, fw: &mut impl ChargeControl, mode: Mode) -> bool {
+        match self.attempt(fw, mode) {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("set {mode}: {e}");
+                false
+            }
+        }
+    }
+
+    fn mode(&self) -> Option<Mode> {
+        match self.state {
+            State::Charging | State::Bypassed => Some(Mode::Auto),
+            State::Limiting => Some(self.band.run_mode),
+            State::Starting | State::Suspended { .. } => None,
+        }
+    }
+
+    fn verify(&mut self, fw: &mut impl ChargeControl) -> bool {
+        let Some(mode) = self.mode() else { return true };
+        match fw.read() {
+            Ok(reported) if reported.matches(mode) => true,
+            Ok(reported) => {
+                println!("verify: firmware reports {reported}, expected {mode}; setting {mode}");
+                self.reassert(fw, mode)
+            }
+            Err(e) => {
+                eprintln!("verify: {e:#}; setting {mode}");
+                self.reassert(fw, mode)
+            }
         }
     }
 
@@ -94,7 +125,14 @@ impl Limiter {
     /// Always sets a mode, replacing whatever was left (e.g. hold from the
     /// last shutdown); above `start` it keeps limiting unless bypassed.
     pub fn start(band: Band, capacity: u8, bypass: bool, fw: &mut impl ChargeControl) -> Self {
-        let mut limiter = Limiter { band, state: State::Starting, events: Vec::new(), failing: false };
+        let mut limiter = Limiter {
+            band,
+            state: State::Starting,
+            events: Vec::new(),
+            failing: false,
+            last_on_ac: true,
+            verify_at: Instant::now() + VERIFY_EVERY,
+        };
         limiter.enter(capacity, bypass, fw);
         limiter
     }
@@ -124,6 +162,12 @@ impl Limiter {
     }
 
     pub fn tick(&mut self, reading: Reading, bypass: bool, fw: &mut impl ChargeControl) {
+        self.tick_at(reading, bypass, fw, Instant::now());
+    }
+
+    fn tick_at(&mut self, reading: Reading, bypass: bool, fw: &mut impl ChargeControl, now: Instant) {
+        let on_ac_edge = reading.on_ac && !self.last_on_ac;
+        self.last_on_ac = reading.on_ac;
         match self.state {
             // a tick between suspend and the actual sleep must not replace
             // the off-mode
@@ -143,11 +187,7 @@ impl Limiter {
         }
         let capacity = reading.capacity;
         let bypassed = self.state == State::Bypassed;
-        if bypass && bypassed {
-            self.reassert(fw, Mode::Auto);
-            return;
-        }
-        if bypass || bypassed || self.state == State::Starting {
+        if bypass != bypassed || self.state == State::Starting {
             self.enter(capacity, bypass, fw);
             return;
         }
@@ -158,16 +198,23 @@ impl Limiter {
                     self.state = State::Limiting;
                     self.events.push(Event::LimitReached { capacity });
                 }
+                return;
             }
-            State::Charging if capacity <= start => self.reassert(fw, Mode::Auto),
             State::Limiting if capacity <= start => {
                 if self.write(fw, Mode::Auto, "release", capacity) {
                     self.state = State::Charging;
                     self.events.push(Event::ChargingResumed { capacity });
                 }
+                return;
             }
-            State::Limiting if capacity >= stop => self.reassert(fw, run_mode),
-            State::Starting | State::Charging | State::Limiting | State::Bypassed | State::Suspended { .. } => {}
+            _ => {}
+        }
+        if on_ac_edge {
+            let ok = self.mode().is_none_or(|mode| self.reassert(fw, mode));
+            self.verify_at = if ok { now + VERIFY_EVERY } else { now };
+        } else if now >= self.verify_at {
+            let ok = self.verify(fw);
+            self.verify_at = if ok { now + VERIFY_EVERY } else { now };
         }
     }
 
@@ -273,5 +320,146 @@ impl ExitPolicy {
                 .mode()
                 .map(|mode| if capacity <= self.off_min { Mode::Auto } else { mode }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::firmware::Reported;
+    use std::cell::Cell;
+
+    struct Mock {
+        sets: Vec<Mode>,
+        reads: Cell<usize>,
+        reported: Reported,
+        fail_sets: usize,
+    }
+
+    impl Mock {
+        fn new(reported: Reported) -> Self {
+            Self { sets: Vec::new(), reads: Cell::new(0), reported, fail_sets: 0 }
+        }
+    }
+
+    impl ChargeControl for Mock {
+        fn set(&mut self, mode: Mode) -> anyhow::Result<()> {
+            if self.fail_sets > 0 {
+                self.fail_sets -= 1;
+                anyhow::bail!("set failed");
+            }
+            self.sets.push(mode);
+            Ok(())
+        }
+
+        fn read(&self) -> anyhow::Result<Reported> {
+            self.reads.set(self.reads.get() + 1);
+            Ok(self.reported)
+        }
+    }
+
+    fn band() -> Band {
+        Band { stop: 50, start: 40, run_mode: Mode::Inhibit }
+    }
+
+    fn reading(capacity: u8, on_ac: bool) -> Reading {
+        Reading { capacity, on_ac }
+    }
+
+    #[test]
+    fn stable_states_are_not_rewritten() {
+        let mut fw = Mock::new(Reported(4));
+        let mut limiter = Limiter::start(band(), 40, false, &mut fw);
+        assert_eq!(fw.sets, [Mode::Auto]);
+        fw.sets.clear();
+        let now = Instant::now();
+        for capacity in [40, 41, 45, 49] {
+            limiter.tick_at(reading(capacity, true), false, &mut fw, now);
+        }
+        assert!(fw.sets.is_empty());
+
+        limiter.tick_at(reading(50, true), false, &mut fw, now);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+        fw.sets.clear();
+        for capacity in [50, 55, 60] {
+            limiter.tick_at(reading(capacity, true), false, &mut fw, now);
+        }
+        assert!(fw.sets.is_empty());
+
+        limiter.tick_at(reading(40, true), false, &mut fw, now);
+        assert_eq!(fw.sets, [Mode::Auto]);
+    }
+
+    #[test]
+    fn ac_return_reapplies_the_current_mode() {
+        let mut fw = Mock::new(Reported(4));
+        let mut limiter = Limiter::start(band(), 55, false, &mut fw);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+        fw.sets.clear();
+        let now = Instant::now();
+        limiter.tick_at(reading(55, false), false, &mut fw, now);
+        assert!(fw.sets.is_empty());
+        limiter.tick_at(reading(55, true), false, &mut fw, now);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+        limiter.tick_at(reading(55, true), false, &mut fw, now);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+    }
+
+    #[test]
+    fn bypass_stays_put_between_ac_edges() {
+        let mut fw = Mock::new(Reported(0));
+        let mut limiter = Limiter::start(band(), 55, true, &mut fw);
+        assert_eq!(fw.sets, [Mode::Auto]);
+        fw.sets.clear();
+        let now = Instant::now();
+        limiter.tick_at(reading(55, true), true, &mut fw, now);
+        assert!(fw.sets.is_empty());
+        limiter.tick_at(reading(55, false), true, &mut fw, now);
+        assert!(fw.sets.is_empty());
+        limiter.tick_at(reading(55, true), true, &mut fw, now);
+        assert_eq!(fw.sets, [Mode::Auto]);
+    }
+
+    #[test]
+    fn failed_start_retries_on_an_ac_tick() {
+        let mut fw = Mock::new(Reported(4));
+        fw.fail_sets = 1;
+        let mut limiter = Limiter::start(band(), 55, false, &mut fw);
+        assert!(fw.sets.is_empty());
+        limiter.tick_at(reading(55, true), false, &mut fw, Instant::now());
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+    }
+
+    #[test]
+    fn failed_ac_return_repair_retries_on_the_next_tick() {
+        let mut fw = Mock::new(Reported(0));
+        let mut limiter = Limiter::start(band(), 55, false, &mut fw);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+        fw.sets.clear();
+        let now = Instant::now();
+        limiter.tick_at(reading(55, false), false, &mut fw, now);
+        fw.fail_sets = 1;
+        limiter.tick_at(reading(55, true), false, &mut fw, now);
+        assert!(fw.sets.is_empty());
+        limiter.tick_at(reading(55, true), false, &mut fw, now);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+    }
+
+    #[test]
+    fn verification_repairs_a_mode_changed_behind_our_back() {
+        let mut fw = Mock::new(Reported(0));
+        let mut limiter = Limiter::start(band(), 55, false, &mut fw);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+        fw.sets.clear();
+        let now = Instant::now() + VERIFY_EVERY;
+        limiter.tick_at(reading(55, true), false, &mut fw, now);
+        assert_eq!(fw.reads.get(), 1);
+        assert_eq!(fw.sets, [Mode::Inhibit]);
+
+        fw.reported = Reported(4);
+        fw.sets.clear();
+        limiter.tick_at(reading(55, true), false, &mut fw, now + VERIFY_EVERY);
+        assert_eq!(fw.reads.get(), 2);
+        assert!(fw.sets.is_empty());
     }
 }

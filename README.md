@@ -654,7 +654,8 @@ mode. The config file is read by the systemd service, not by direct CLI runs.
 
 At start it requests auto at or below `start`, otherwise the run mode,
 replacing a hold left from shutdown. While running, it stops charging at
-`stop` and resumes at `start`; ticks on battery leave the mode alone.
+`stop` and resumes at `start`; ticks on battery leave the mode alone, and AC
+returning re-applies the current mode.
 Shutdown is told apart from a service stop by `systemctl is-system-running` = `stopping`.
 At shutdown it saves energy_now; at the next start it logs
 `off N min in hold: 51% -> 51%, energy +0 mWh` (journal, and in `status`).
@@ -713,14 +714,17 @@ and is retried on the next AC-powered poll if the threshold condition still
 holds. If a startup write fails, initialization is retried on each AC-powered
 poll, including between thresholds. Each retry uses the current capacity and
 bypass request to select the mode. After a successful write, normal hysteresis
-resumes. Successful writes mean the ACPI call returned without an
-`acpi_call` error, not independent verification of charge flow. `finish`
-consumes the limiter, so nothing ticks after it.
+resumes. Stable states are not rewritten on every poll: the daemon re-applies
+the current mode when AC returns, and checks GBCC every five minutes, writing
+again only if the firmware reports a different mode. Successful writes mean
+the ACPI call returned without an `acpi_call` error, not independent
+verification of charge flow. `finish` consumes the limiter, so nothing ticks
+after it.
 
 ## Verification and limitations
 
-There is currently no automated test suite. `cargo check --locked` checks
-compilation; it does not verify firmware behavior. The Windows build is
+`cargo test --locked` runs the limiter unit tests; it does not verify firmware
+behavior. `cargo check --locked` checks compilation. The Windows build is
 checked with `cargo check --target x86_64-pc-windows-gnu` and `clippy`, and
 smoke-tested on a CI runner without HP firmware; on laptops it has only the
 user reports in [Tested models](#tested-models).

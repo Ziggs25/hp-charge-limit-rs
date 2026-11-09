@@ -85,6 +85,13 @@ impl Reported {
     pub fn is_hold(self) -> bool {
         self.0 == reported::HOLD
     }
+    pub fn matches(self, mode: Mode) -> bool {
+        match mode {
+            Mode::Auto => matches!(self.0, reported::AUTO | reported::CHARGING),
+            Mode::Inhibit => matches!(self.0, reported::INHIBIT | reported::INHIBIT_VARIANT),
+            Mode::Hold => self.is_hold(),
+        }
+    }
 }
 
 impl fmt::Display for Reported {
@@ -96,6 +103,7 @@ impl fmt::Display for Reported {
 /// Something that can switch the firmware charge mode.
 pub trait ChargeControl {
     fn set(&mut self, mode: Mode) -> Result<()>;
+    fn read(&self) -> Result<Reported>;
 }
 
 /// The real firmware.
@@ -110,5 +118,8 @@ impl Wmi {
 impl ChargeControl for Wmi {
     fn set(&mut self, mode: Mode) -> Result<()> {
         backend::set(mode)
+    }
+    fn read(&self) -> Result<Reported> {
+        backend::read()
     }
 }

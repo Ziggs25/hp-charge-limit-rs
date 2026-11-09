@@ -32,3 +32,10 @@ features = [
     "Win32_System_Variant",
     "Win32_System_Wmi",
 ]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
