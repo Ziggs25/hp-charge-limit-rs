@@ -30,7 +30,8 @@ pub enum Mode {
     Auto = 0x0000,
     /// SBIS: no charging, white LED; the EC clears it at shutdown
     Inhibit = 0x0500,
-    /// SBTC: no charging, survives shutdown; LED/status still say charging
+    /// SBTC: no charging, survives shutdown; on board 88ED Linux reports
+    /// "Not charging" with a white LED, but other boards may say charging
     Hold = 0x0300,
 }
 
@@ -89,8 +90,17 @@ impl Reported {
     pub fn matches(self, mode: Mode) -> bool {
         match mode {
             Mode::Auto => matches!(self.0, reported::AUTO | reported::CHARGING),
-            Mode::Inhibit => matches!(self.0, reported::INHIBIT | reported::INHIBIT_VARIANT | 1 | 2),
-            Mode::Hold => self.is_hold() || self.0 == 2,
+            // Board 88ED has no usable inhibit-while-charging state, so the
+            // backend writes hold for both modes and GBCC reports 3. Byte 1 is
+            // the firmware's true inhibit state; 4/5 are inhibit variants.
+            Mode::Inhibit => {
+                self.is_hold()
+                    || matches!(
+                        self.0,
+                        reported::CHARGING | reported::INHIBIT | reported::INHIBIT_VARIANT
+                    )
+            }
+            Mode::Hold => self.is_hold(),
         }
     }
 }
@@ -122,5 +132,30 @@ impl ChargeControl for Wmi {
     }
     fn read(&self) -> Result<Reported> {
         backend::read()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hold_readback_satisfies_both_requested_modes() {
+        assert!(Reported(3).matches(Mode::Inhibit));
+        assert!(Reported(3).matches(Mode::Hold));
+    }
+
+    #[test]
+    fn force_discharge_is_never_accepted_as_success() {
+        assert!(!Reported(2).matches(Mode::Inhibit));
+        assert!(!Reported(2).matches(Mode::Hold));
+    }
+
+    #[test]
+    fn true_inhibit_readback_still_satisfies_inhibit() {
+        assert!(Reported(1).matches(Mode::Inhibit));
+        assert!(Reported(4).matches(Mode::Inhibit));
+        assert!(Reported(5).matches(Mode::Inhibit));
+        assert!(!Reported(1).matches(Mode::Hold));
     }
 }

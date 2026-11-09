@@ -5,8 +5,8 @@
 //! Firmware modes (see `firmware`):
 //!   auto     normal charging
 //!   inhibit  SBIS: no charging, white LED; cleared by the EC at shutdown
-//!   hold     SBTC: no charging, survives shutdown (ec-re/SBTC_HOLD.md),
-//!            but LED and sysfs status say "Charging"
+//!   hold     SBTC: no charging, survives shutdown (ec-re/SBTC_HOLD.md);
+//!            board 88ED reports "Not charging", other boards may say "Charging"
 //! Only these three are ever written: never discharge or battery ship mode.
 
 pub mod cli;

@@ -15,13 +15,27 @@ const ACPI_REPLY_MAX: usize = 4096;
 const ACPI_ERROR_PREFIX: &str = "Error";
 
 /// The method call that sets `mode`.
+///
+/// On HP Victus 16-e0xxx (board 88ED), `\_SB.WMID.SBCC` takes four integer
+/// arguments (`/tmp/dsdt.dsl:8416-8522`):
+///
+/// - `SBCC 0 0 0 0`: auto; clears MBDC. Works on AC or battery.
+/// - `SBCC 0 1 0 0`: true inhibit; rejected with `0x36` while charging.
+/// - `SBCC 0 2 0 0`: force-discharge; never send.
+/// - `SBCC 0x63 0 0 0`: auto; requires AC (`ADPP == 1`).
+/// - `SBCC 0x63 1 0 0`: force-discharge (GBCC reports 2); never send.
+/// - `SBCC 0x63 2 0 0`: hold (GBCC reports 3); requires AC.
+///
+/// The EC turns hold into `MBDC=0x1C`, isolates the battery from charging, and
+/// Linux reports `Not charging`. Because true inhibit is rejected while
+/// charging, both `Mode::Inhibit` and `Mode::Hold` deliberately use the native
+/// hold command on this board.
 fn sbcc_command(mode: Mode) -> String {
-    let arg1 = match mode {
-        Mode::Auto => 0,
-        Mode::Inhibit => 1,
-        Mode::Hold => 2,
+    let args = match mode {
+        Mode::Auto => "0 0 0 0",
+        Mode::Inhibit | Mode::Hold => "0x63 2 0 0",
     };
-    format!("{SBCC} 0x63 {arg1} 0 0")
+    format!("{SBCC} {args}")
 }
 
 /// GBCC replies e.g. `[0x0, 0x4, {0x03, 0xff, 0x01, 0x00}]`.
@@ -58,4 +72,20 @@ pub(super) fn read() -> Result<Reported> {
 
 pub(super) fn set(mode: Mode) -> Result<()> {
     acpi_call(&sbcc_command(mode)).map(drop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_uses_the_native_zero_command() {
+        assert_eq!(sbcc_command(Mode::Auto), r"\_SB.WMID.SBCC 0 0 0 0");
+    }
+
+    #[test]
+    fn inhibit_and_hold_use_hold_but_never_force_discharge() {
+        assert_eq!(sbcc_command(Mode::Inhibit), r"\_SB.WMID.SBCC 0x63 2 0 0");
+        assert_eq!(sbcc_command(Mode::Hold), r"\_SB.WMID.SBCC 0x63 2 0 0");
+    }
 }
