@@ -8,8 +8,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 const WATCH_SAMPLE: Duration = Duration::from_secs(5);
-/// Reported energy moves in 10 mWh steps (sysfs energy_now; Windows
-/// RemainingCapacity is often coarser); smaller changes are noise.
+/// Reported energy moves in 10 mWh steps (sysfs energy_now); smaller
+/// changes are noise.
 const ENERGY_RESOLUTION: Energy = Energy::from_mwh(10);
 
 pub fn show(watch_secs: Option<u64>) -> Result<()> {

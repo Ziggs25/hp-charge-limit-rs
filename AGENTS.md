@@ -76,6 +76,9 @@ Important implications:
 
 Repository: `/home/CheeseGuru/hp-charge-limit-rs`
 
+- This branch is Linux-only: the Windows WMI, SCM, ACL, and registry
+  backends have been removed. `acpi_call` and systemd are the only
+  firmware and service transports.
 - `src/firmware/acpi_call.rs`: Linux backend; calls `SBCC` with four native
   integer arguments; maps `Inhibit` and `Hold` to `0x63 2 0 0` on this board.
 - `src/firmware/mod.rs`: `Mode`, `Reported`, `Reported::matches`.
@@ -85,7 +88,7 @@ Repository: `/home/CheeseGuru/hp-charge-limit-rs`
 - `src/daemon/limiter.rs`: charge band and verification.
   - `stop=60`, `start=40`, poll interval 60 s.
   - `run-mode=hold`, `off-mode=hold`, `stop-mode=auto`.
-  - Since commit `08181bb`, the daemon verifies immediately after a
+  - Since commit `dbb5a3d`, the daemon verifies immediately after a
     start/resume/bypass write, rechecks after 60 s (`VERIFY_SOON`), then
     verifies every 5 minutes (`VERIFY_EVERY`).
 - `src/service/systemd.rs`: hardcodes `hp-charge-limit-rs.service`, but the
@@ -96,6 +99,8 @@ Repository: `/home/CheeseGuru/hp-charge-limit-rs`
 ## NixOS deployment
 
 - Vendored source: `/etc/nixos/pkgs/hp-charge-limit-rs/`
+  - Synced before the Linux-only refactor; re-vendor before deploying this
+    branch.
 - Package: `/etc/nixos/pkgs/hp-charge-limit-rs.nix`
 - Service definition: `/etc/nixos/modules/system/power.nix`
 - Unit: `hp-charge-limit.service`
@@ -213,8 +218,8 @@ nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#clippy nixpkgs#gcc --command \
   cargo clippy --all-targets --locked -- -D warnings
 ```
 
-Current result: 12 tests pass; clippy clean; the Nix package has
-`doCheck = true`.
+Current result after the Linux-only refactor: 12 tests pass; clippy clean;
+the Nix package has `doCheck = true`.
 
 Do not run `cargo fmt --all` or rely on `cargo fmt --check`: the current
 rustfmt reformats pre-existing baseline files. Format only touched lines or
@@ -234,6 +239,7 @@ keep the existing style.
   - `c5ec488` `fix(firmware): avoid force-discharge SBCC commands on board 88ED`
   - `211fe2c` `fix(firmware): call SBCC with native 4 integer arguments for board 88ED`
   - `f09a28a` `fix(limiter): eliminate 30s reassertion loop ...`
+  - `e437e92` `docs: add machine-specific AGENTS.md`
 - NixOS config: `/etc/nixos`, branch `chore/millennium-update`
   - `04f7f1c` `fix(power): verify charge mode after daemon start`
   - `3889daa` `fix(power): run charge limiter in hold mode`

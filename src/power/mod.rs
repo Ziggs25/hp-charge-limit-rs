@@ -1,14 +1,7 @@
-//! Battery and AC adapter readings: sysfs on Linux, the Windows power APIs
-//! and WMI battery classes on Windows. Both report the same units.
+//! Battery and AC adapter readings from Linux sysfs.
 
-#[cfg(target_os = "linux")]
 mod sysfs;
-#[cfg(target_os = "linux")]
 pub use sysfs::*;
-#[cfg(windows)]
-mod windows;
-#[cfg(windows)]
-pub use self::windows::*;
 
 use std::fmt;
 use std::ops::Sub;

@@ -1,21 +1,10 @@
-//! The WMI battery-charge-control methods SBCC (set) and GBCC (get).
+//! The firmware battery-charge-control methods SBCC (set) and GBCC (get).
 //!
-//! Both platforms reach the same firmware code: Linux calls the ACPI
-//! methods directly through acpi_call, Windows goes through the HP BIOS WMI
-//! class `hpqBIntM`, whose dispatcher (WHCM) routes command type 0x2B to
-//! GBCC (read) and SBCC (write).
+//! Linux calls the ACPI methods directly through `acpi_call`.
 
-#[cfg(target_os = "linux")]
 mod acpi_call;
-#[cfg(target_os = "linux")]
-use acpi_call as backend;
-#[cfg(windows)]
-mod hpqbint;
-#[cfg(windows)]
-use hpqbint as backend;
-#[cfg(windows)]
-pub use hpqbint::interface;
 
+use acpi_call as backend;
 use anyhow::Result;
 use clap::ValueEnum;
 use std::fmt;
@@ -42,15 +31,7 @@ impl fmt::Display for Mode {
     }
 }
 
-/// The 4 data bytes SBCC reads: the mode as a little-endian dword.
-#[allow(dead_code)]
-fn mode_data(mode: Mode) -> [u8; 4] {
-    (mode as u32).to_le_bytes()
-}
-
-/// GBCC mode byte values. GBCC derives them from the EC charge state and
-/// flags (last match wins); mainline hp-wmi reads the same byte on Spectre
-/// boards (GBCO) and names 1, 5 and 6 the same way.
+/// GBCC mode byte values.
 mod reported {
     pub const AUTO: u8 = 0;
     /// Auto while charging is in progress
